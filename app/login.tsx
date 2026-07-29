@@ -1,3 +1,5 @@
+import { router } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
@@ -11,18 +13,16 @@ import {
 
 import { loginUser } from '../api/auth';
 
-type LoginProps = {
-  onLoginSuccess: (token: string) => void;
-};
-
 const MAX_LOGIN_ATTEMPTS = 4;
 
 const validateEmail = (email: string): string => {
-  if (!email.trim()) {
+  const trimmedEmail = email.trim();
+
+  if (!trimmedEmail) {
     return 'Email is required.';
   }
 
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail)) {
     return 'Invalid email format.';
   }
 
@@ -37,9 +37,7 @@ const validatePassword = (password: string): string => {
   return '';
 };
 
-export default function LoginScreen({
-  onLoginSuccess,
-}: LoginProps) {
+export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
@@ -74,10 +72,14 @@ export default function LoginScreen({
       setFailedAttempts(0);
       setPassword('');
 
-      onLoginSuccess(token);
+     await SecureStore.setItemAsync('token', token);
+
+      router.replace('/(tabs)');
     } catch (error) {
       const nextAttemptCount = failedAttempts + 1;
+
       setFailedAttempts(nextAttemptCount);
+      setPassword('');
 
       const message =
         error instanceof Error
@@ -117,6 +119,7 @@ export default function LoginScreen({
     <View style={styles.container}>
       <View style={styles.form}>
         <Text style={styles.title}>Package Tracker</Text>
+
         <Text style={styles.subtitle}>
           Sign in to continue
         </Text>
@@ -135,10 +138,13 @@ export default function LoginScreen({
           autoCorrect={false}
           keyboardType="email-address"
           editable={!loading && !isLockedOut}
+          returnKeyType="next"
         />
 
         {emailError ? (
-          <Text style={styles.errorText}>{emailError}</Text>
+          <Text style={styles.errorText}>
+            {emailError}
+          </Text>
         ) : null}
 
         <Text style={styles.label}>Password</Text>
@@ -155,6 +161,7 @@ export default function LoginScreen({
           autoCapitalize="none"
           autoCorrect={false}
           editable={!loading && !isLockedOut}
+          returnKeyType="done"
           onSubmitEditing={handleLogin}
         />
 
@@ -178,7 +185,7 @@ export default function LoginScreen({
             </Text>
 
             <Text style={styles.lockoutText}>
-              Please close the app and try again later.
+              Please try again later.
             </Text>
           </View>
         ) : (
@@ -189,9 +196,10 @@ export default function LoginScreen({
             ]}
             onPress={handleLogin}
             disabled={loading}
+            activeOpacity={0.8}
           >
             {loading ? (
-              <ActivityIndicator />
+              <ActivityIndicator color="#ffffff" />
             ) : (
               <Text style={styles.loginButtonText}>
                 Log In
@@ -224,6 +232,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     textAlign: 'center',
     marginBottom: 32,
+    color: '#555555',
   },
   label: {
     fontSize: 15,
@@ -232,16 +241,20 @@ const styles = StyleSheet.create({
   },
   input: {
     borderWidth: 1,
+    borderColor: '#aaaaaa',
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 12,
     fontSize: 16,
     marginBottom: 6,
+    backgroundColor: '#ffffff',
   },
   inputError: {
+    borderColor: '#b00020',
     borderWidth: 2,
   },
   errorText: {
+    color: '#b00020',
     fontSize: 13,
     marginBottom: 12,
   },
@@ -249,6 +262,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
     marginBottom: 12,
+    color: '#555555',
   },
   loginButton: {
     borderRadius: 8,
@@ -267,17 +281,21 @@ const styles = StyleSheet.create({
   },
   lockoutBox: {
     borderWidth: 1,
+    borderColor: '#b00020',
     borderRadius: 8,
     padding: 16,
     marginTop: 12,
+    backgroundColor: '#fff5f5',
   },
   lockoutTitle: {
     fontSize: 16,
     fontWeight: '700',
     textAlign: 'center',
     marginBottom: 6,
+    color: '#b00020',
   },
   lockoutText: {
     textAlign: 'center',
+    color: '#555555',
   },
 });
