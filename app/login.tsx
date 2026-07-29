@@ -1,9 +1,12 @@
 import { router } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import React, { useState } from 'react';
+
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
   StyleSheet,
   Text,
   TextInput,
@@ -47,38 +50,57 @@ export default function LoginScreen() {
   const [failedAttempts, setFailedAttempts] = useState(0);
   const [loading, setLoading] = useState(false);
 
-  const isLockedOut = failedAttempts >= MAX_LOGIN_ATTEMPTS;
+  const isLockedOut =
+    failedAttempts >= MAX_LOGIN_ATTEMPTS;
 
   const handleLogin = async () => {
     if (loading || isLockedOut) {
       return;
     }
 
-    const currentEmailError = validateEmail(email);
-    const currentPasswordError = validatePassword(password);
+    const currentEmailError =
+      validateEmail(email);
+
+    const currentPasswordError =
+      validatePassword(password);
 
     setEmailError(currentEmailError);
     setPasswordError(currentPasswordError);
 
-    if (currentEmailError || currentPasswordError) {
+    if (
+      currentEmailError ||
+      currentPasswordError
+    ) {
       return;
     }
 
     setLoading(true);
 
     try {
-      const token = await loginUser(email.trim(), password);
+      const token = await loginUser(
+        email.trim(),
+        password
+      );
+
+      await SecureStore.setItemAsync(
+        'token',
+        token
+      );
+
+      const savedToken =
+        await SecureStore.getItemAsync('token');
+
+      if (!savedToken) {
+        throw new Error(
+          'The login token could not be saved.'
+        );
+      }
 
       setFailedAttempts(0);
       setPassword('');
 
-     await SecureStore.setItemAsync('token', token);
-
-      router.replace('/(tabs)');
+      router.replace('/home-screen');
     } catch (error) {
-      const nextAttemptCount = failedAttempts + 1;
-
-      setFailedAttempts(nextAttemptCount);
       setPassword('');
 
       const message =
@@ -86,50 +108,84 @@ export default function LoginScreen() {
           ? error.message
           : 'Unable to log in.';
 
-      if (nextAttemptCount >= MAX_LOGIN_ATTEMPTS) {
-        Alert.alert(
-          'Too Many Attempts',
-          'You have reached the maximum number of login attempts.'
-        );
-      } else {
-        Alert.alert('Login Failed', message);
-      }
+      setFailedAttempts((currentAttempts) => {
+        const nextAttemptCount =
+          currentAttempts + 1;
+
+        if (
+          nextAttemptCount >=
+          MAX_LOGIN_ATTEMPTS
+        ) {
+          Alert.alert(
+            'Too Many Attempts',
+            'You have reached the maximum number of login attempts.'
+          );
+        } else {
+          Alert.alert(
+            'Login Failed',
+            message
+          );
+        }
+
+        return nextAttemptCount;
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  const handleEmailChange = (value: string) => {
+  const handleEmailChange = (
+    value: string
+  ) => {
     setEmail(value);
 
     if (emailError) {
-      setEmailError(validateEmail(value));
+      setEmailError(
+        validateEmail(value)
+      );
     }
   };
 
-  const handlePasswordChange = (value: string) => {
+  const handlePasswordChange = (
+    value: string
+  ) => {
     setPassword(value);
 
     if (passwordError) {
-      setPasswordError(validatePassword(value));
+      setPasswordError(
+        validatePassword(value)
+      );
     }
   };
 
   return (
-    <View style={styles.container}>
+    <KeyboardAvoidingView
+      style={styles.container}
+      behavior={
+        Platform.OS === 'ios'
+          ? 'padding'
+          : undefined
+      }
+    >
       <View style={styles.form}>
-        <Text style={styles.title}>Package Tracker</Text>
+        <Text style={styles.title}>
+          Package Tracker
+        </Text>
 
         <Text style={styles.subtitle}>
           Sign in to continue
         </Text>
 
-        <Text style={styles.label}>Email</Text>
+        <Text style={styles.label}>
+          Email
+        </Text>
 
         <TextInput
           style={[
             styles.input,
-            emailError ? styles.inputError : null,
+            emailError
+              ? styles.inputError
+              : null,
           ]}
           placeholder="Email"
           value={email}
@@ -137,7 +193,10 @@ export default function LoginScreen() {
           autoCapitalize="none"
           autoCorrect={false}
           keyboardType="email-address"
-          editable={!loading && !isLockedOut}
+          editable={
+            !loading &&
+            !isLockedOut
+          }
           returnKeyType="next"
         />
 
@@ -147,22 +206,33 @@ export default function LoginScreen() {
           </Text>
         ) : null}
 
-        <Text style={styles.label}>Password</Text>
+        <Text style={styles.label}>
+          Password
+        </Text>
 
         <TextInput
           style={[
             styles.input,
-            passwordError ? styles.inputError : null,
+            passwordError
+              ? styles.inputError
+              : null,
           ]}
           placeholder="Password"
           value={password}
-          onChangeText={handlePasswordChange}
+          onChangeText={
+            handlePasswordChange
+          }
           secureTextEntry
           autoCapitalize="none"
           autoCorrect={false}
-          editable={!loading && !isLockedOut}
+          editable={
+            !loading &&
+            !isLockedOut
+          }
           returnKeyType="done"
-          onSubmitEditing={handleLogin}
+          onSubmitEditing={
+            handleLogin
+          }
         />
 
         {passwordError ? (
@@ -171,44 +241,61 @@ export default function LoginScreen() {
           </Text>
         ) : null}
 
-        {!isLockedOut && failedAttempts > 0 ? (
+        {!isLockedOut &&
+        failedAttempts > 0 ? (
           <Text style={styles.attemptText}>
-            Failed attempts: {failedAttempts} of{' '}
+            Failed attempts:{' '}
+            {failedAttempts} of{' '}
             {MAX_LOGIN_ATTEMPTS}
           </Text>
         ) : null}
 
         {isLockedOut ? (
           <View style={styles.lockoutBox}>
-            <Text style={styles.lockoutTitle}>
+            <Text
+              style={
+                styles.lockoutTitle
+              }
+            >
               Too many login attempts
             </Text>
 
-            <Text style={styles.lockoutText}>
-              Please try again later.
+            <Text
+              style={styles.lockoutText}
+            >
+              Please restart the app
+              and try again later.
             </Text>
           </View>
         ) : (
           <TouchableOpacity
             style={[
               styles.loginButton,
-              loading ? styles.disabledButton : null,
+              loading
+                ? styles.disabledButton
+                : null,
             ]}
             onPress={handleLogin}
             disabled={loading}
             activeOpacity={0.8}
           >
             {loading ? (
-              <ActivityIndicator color="#ffffff" />
+              <ActivityIndicator
+                color="#ffffff"
+              />
             ) : (
-              <Text style={styles.loginButtonText}>
+              <Text
+                style={
+                  styles.loginButtonText
+                }
+              >
                 Log In
               </Text>
             )}
           </TouchableOpacity>
         )}
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 

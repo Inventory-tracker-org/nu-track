@@ -1,6 +1,7 @@
 import { Redirect } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { useEffect, useState } from 'react';
+
 import {
     ActivityIndicator,
     StyleSheet,
@@ -8,43 +9,46 @@ import {
 } from 'react-native';
 
 export default function IndexScreen() {
-  const [loading, setLoading] = useState(true);
-  const [hasToken, setHasToken] = useState(false);
+  const [loading, setLoading] =
+    useState(true);
+
+  const [hasToken, setHasToken] =
+    useState(false);
 
   useEffect(() => {
-    const checkAuthentication = async () => {
+    const checkToken = async () => {
       try {
-        const token = await SecureStore.getItemAsync('token');
+        const token =
+          await SecureStore.getItemAsync(
+            'token'
+          );
 
         setHasToken(Boolean(token));
-      } catch (error) {
-        console.error('Unable to read authentication token:', error);
-        setHasToken(false);
       } finally {
         setLoading(false);
       }
     };
 
-    checkAuthentication();
+    checkToken();
   }, []);
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
+      <View style={styles.container}>
         <ActivityIndicator size="large" />
       </View>
     );
   }
 
-  if (hasToken) {
-    return <Redirect href="/home-screen" />;
-  }
-
-  return <Redirect href="/login" />;
+  return hasToken ? (
+    <Redirect href="/home-screen" />
+  ) : (
+    <Redirect href="/login" />
+  );
 }
 
 const styles = StyleSheet.create({
-  loadingContainer: {
+  container: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',

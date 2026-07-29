@@ -13,10 +13,9 @@ import {
   CameraView,
   useCameraPermissions,
 } from 'expo-camera';
-import {
-  router,
-  useLocalSearchParams,
-} from 'expo-router';
+import { router } from 'expo-router';
+
+import { usePackageScan } from '../context/PackageScanContext';
 
 const MESSAGE_DURATION = 3000;
 const REPEAT_SCAN_DELAY = 1500;
@@ -24,7 +23,6 @@ const REPEAT_SCAN_DELAY = 1500;
 const isValidPackageBarcode = (value: string): boolean => {
   const cleanedValue = value.trim();
 
-  // Reject empty, extremely short, or unusually long values.
   if (
     cleanedValue.length < 8 ||
     cleanedValue.length > 40
@@ -32,7 +30,6 @@ const isValidPackageBarcode = (value: string): boolean => {
     return false;
   }
 
-  // Reject website links.
   if (
     /^https?:\/\//i.test(cleanedValue) ||
     /^www\./i.test(cleanedValue)
@@ -40,13 +37,14 @@ const isValidPackageBarcode = (value: string): boolean => {
     return false;
   }
 
-  // Allow only letters, numbers, and hyphens.
   if (!/^[A-Z0-9-]+$/i.test(cleanedValue)) {
     return false;
   }
 
-  // Reject values containing no numbers, such as "FVF".
-  if (!/\d/.test(cleanedValue)) {
+  const digitCount =
+    cleanedValue.match(/\d/g)?.length ?? 0;
+
+  if (digitCount < 6) {
     return false;
   }
 
@@ -57,20 +55,17 @@ export default function ScanScreen() {
   const [permission, requestPermission] =
     useCameraPermissions();
 
-  const { savedBarcodes } = useLocalSearchParams<{
-    savedBarcodes?: string | string[];
-  }>();
+  const {
+    barcodes,
+    addBarcode,
+    clearBarcodes,
+  } = usePackageScan();
 
-  const [barcodes, setBarcodes] = useState<string[]>([]);
-  const [duplicateMessage, setDuplicateMessage] =
-    useState('');
-  const [invalidMessage, setInvalidMessage] =
-    useState('');
+  const [message, setMessage] = useState('');
+  const [messageType, setMessageType] =
+    useState<'duplicate' | 'invalid' | null>(null);
 
-  const duplicateTimerRef =
-    useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const invalidTimerRef =
+  const messageTimerRef =
     useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const lastScanRef = useRef<{
@@ -78,91 +73,64 @@ export default function ScanScreen() {
     time: number;
   } | null>(null);
 
-  /*
-   * Receive the updated barcode list when the user
-   * returns from package.tsx after removing packages.
-   */
-  useEffect(() => {
-    const barcodeParameter = Array.isArray(savedBarcodes)
-      ? savedBarcodes[0]
-      : savedBarcodes;
-
-    if (!barcodeParameter) {
-      return;
-    }
-
-    try {
-      const parsedBarcodes = JSON.parse(barcodeParameter);
-
-      if (!Array.isArray(parsedBarcodes)) {
-        return;
-      }
-
-      setBarcodes(
-        parsedBarcodes.filter(
-          (barcode): barcode is string =>
-            typeof barcode === 'string'
-        )
-      );
-    } catch (error) {
-      console.warn(
-        'Unable to read returned barcodes:',
-        error
-      );
-    }
-  }, [savedBarcodes]);
-
-  /*
-   * Clear notification timers when this screen closes.
-   */
   useEffect(() => {
     return () => {
-      if (duplicateTimerRef.current) {
-        clearTimeout(duplicateTimerRef.current);
-      }
-
-      if (invalidTimerRef.current) {
-        clearTimeout(invalidTimerRef.current);
+      if (messageTimerRef.current) {
+        clearTimeout(messageTimerRef.current);
       }
     };
   }, []);
 
-  const showDuplicateMessage = (barcode: string) => {
-    if (duplicateTimerRef.current) {
-      clearTimeout(duplicateTimerRef.current);
+  const showTemporaryMessage = (
+    text: string,
+    type: 'duplicate' | 'invalid'
+  ) => {
+    if (messageTimerRef.current) {
+      clearTimeout(messageTimerRef.current);
     }
 
-    setInvalidMessage('');
+    setMessage(text);
+    setMessageType(type);
 
-    setDuplicateMessage(
-      `Package ${barcode} has already been scanned.`
-    );
-
-    duplicateTimerRef.current = setTimeout(() => {
-      setDuplicateMessage('');
-      duplicateTimerRef.current = null;
+    messageTimerRef.current = setTimeout(() => {
+      setMessage('');
+      setMessageType(null);
+      messageTimerRef.current = null;
     }, MESSAGE_DURATION);
   };
 
-  const showInvalidMessage = (barcode: string) => {
-    if (invalidTimerRef.current) {
-      clearTimeout(invalidTimerRef.current);
+  const leaveScanner = () => {
+    clearBarcodes();
+
+    if (router.canGoBack()) {
+      router.back();
+      return;
     }
 
-    setDuplicateMessage('');
-
-    setInvalidMessage(
-      `"${barcode}" does not appear to be a valid package barcode.`
-    );
-
-    invalidTimerRef.current = setTimeout(() => {
-      setInvalidMessage('');
-      invalidTimerRef.current = null;
-    }, MESSAGE_DURATION);
+    router.replace('/home-screen');
   };
 
   const handleBack = () => {
-    router.replace('/home-screen');
+    if (barcodes.length === 0) {
+      leaveScanner();
+      return;
+    }
+
+    Alert.alert(
+      'Remove All Packages',
+      'Are you sure you want to remove all packages?',
+      [
+        {
+          text: 'No',
+          style: 'cancel',
+        },
+        {
+          text: 'Yes',
+          style: 'destructive',
+          onPress: leaveScanner,
+        },
+      ]
+    );
   };
 
   const handleBarcodeScanned = (
@@ -177,10 +145,6 @@ export default function ScanScreen() {
     const now = Date.now();
     const lastScan = lastScanRef.current;
 
-    /*
-     * Prevent the camera from repeatedly firing while
-     * the same barcode remains visible.
-     */
     if (
       lastScan &&
       lastScan.value === scannedValue &&
@@ -195,19 +159,24 @@ export default function ScanScreen() {
     };
 
     if (!isValidPackageBarcode(scannedValue)) {
-      showInvalidMessage(scannedValue);
+      showTemporaryMessage(
+        `"${scannedValue}" does not appear to be a valid package barcode.`,
+        'invalid'
+      );
+
       return;
     }
 
     if (barcodes.includes(scannedValue)) {
-      showDuplicateMessage(scannedValue);
+      showTemporaryMessage(
+        `Package ${scannedValue} has already been scanned.`,
+        'duplicate'
+      );
+
       return;
     }
 
-    setBarcodes((currentBarcodes) => [
-      ...currentBarcodes,
-      scannedValue,
-    ]);
+    addBarcode(scannedValue);
   };
 
   const handleFinish = () => {
@@ -216,15 +185,11 @@ export default function ScanScreen() {
         'No Packages Scanned',
         'Scan at least one package before continuing.'
       );
+
       return;
     }
 
-    router.push({
-      pathname: '/package',
-      params: {
-        barcodes: JSON.stringify(barcodes),
-      },
-    });
+    router.push('/package');
   };
 
   if (!permission) {
@@ -239,8 +204,7 @@ export default function ScanScreen() {
     return (
       <View style={styles.centered}>
         <Text style={styles.permissionText}>
-          Camera access is required to scan package
-          barcodes.
+          Camera access is required to scan package barcodes.
         </Text>
 
         <Button
@@ -258,11 +222,7 @@ export default function ScanScreen() {
         facing="back"
         onBarcodeScanned={handleBarcodeScanned}
         barcodeScannerSettings={{
-          barcodeTypes: [
-            'code128',
-            'code39',
-            'code93',
-          ],
+          barcodeTypes: ['code128', 'code39', 'code93'],
         }}
       />
 
@@ -294,18 +254,17 @@ export default function ScanScreen() {
         </TouchableOpacity>
       </View>
 
-      {duplicateMessage ? (
-        <View style={styles.messageBox}>
+      {message ? (
+        <View
+          style={[
+            styles.messageBox,
+            messageType === 'duplicate'
+              ? styles.duplicateMessageBox
+              : styles.invalidMessageBox,
+          ]}
+        >
           <Text style={styles.messageText}>
-            {duplicateMessage}
-          </Text>
-        </View>
-      ) : null}
-
-      {invalidMessage ? (
-        <View style={styles.messageBox}>
-          <Text style={styles.messageText}>
-            {invalidMessage}
+            {message}
           </Text>
         </View>
       ) : null}
@@ -426,10 +385,15 @@ const styles = StyleSheet.create({
     left: 24,
     right: 24,
     zIndex: 20,
-    backgroundColor: '#b00020',
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 13,
+  },
+  duplicateMessageBox: {
+    backgroundColor: '#9a6700',
+  },
+  invalidMessageBox: {
+    backgroundColor: '#b00020',
   },
   messageText: {
     color: '#ffffff',

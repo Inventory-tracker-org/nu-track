@@ -1,43 +1,93 @@
-import React, { useState } from 'react';
-import { 
-  StyleSheet, 
-  Text, 
-  TextInput, 
-  TouchableOpacity, 
-  View, 
-  ActivityIndicator, 
-  Alert 
-} from 'react-native';
+type CreatePackageInput = {
+  barcode: string;
+  date: string;
+  time: string;
+  comment: string;
+  lastName: string;
+  latitude: number | null;
+  longitude: number | null;
+  photoUri: string;
+  signatureUri: string;
+  token: string;
+};
 
-const formData = new FormData();
+type CreatePackageResponse = {
+  success: boolean;
+  message?: string;
+  error?: string;
+  data?: unknown;
+};
 
-formData.append('barcode', barcode);
-formData.append('date', date);
-formData.append('time', time);
-formData.append('comment', comment);
-formData.append('lastName', deliveredTo);
-formData.append('latitude', String(latitude));
-formData.append('longitude', String(longitude));
+export async function createPackage(
+  input: CreatePackageInput
+): Promise<CreatePackageResponse> {
+  const formData = new FormData();
 
-formData.append('photo', {
-    uri: photoUri,
-    name: 'package-photo.jpg',
-    type: 'image/jpeg',
-} as any);
+  formData.append('barcode', input.barcode);
+  formData.append('date', input.date);
+  formData.append('time', input.time);
+  formData.append('comment', input.comment);
+  formData.append('lastName', input.lastName);
 
-formData.append('signature', {
-    uri: signatureUri,
-    name: 'signature.png',
-    type: 'image/png',
-} as any);
+  if (input.latitude !== null) {
+    formData.append(
+      'latitude',
+      String(input.latitude)
+    );
+  }
 
-const response = await fetch(
+  if (input.longitude !== null) {
+    formData.append(
+      'longitude',
+      String(input.longitude)
+    );
+  }
+
+  formData.append(
+    'photo',
+    {
+      uri: input.photoUri,
+      name: 'package-photo.jpg',
+      type: 'image/jpeg',
+    } as any
+  );
+
+  formData.append(
+    'signature',
+    {
+      uri: input.signatureUri,
+      name: 'signature.png',
+      type: 'image/png',
+    } as any
+  );
+
+  const response = await fetch(
     'https://dataworks-7b7x.onrender.com/api/create-package.php',
     {
-        method: 'POST',
-        headers: {
-            Authorization: `Bearer ${token}`,
-        },
-        body: formData,
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${input.token}`,
+        Accept: 'application/json',
+      },
+      body: formData,
     }
-);
+  );
+
+  let data: CreatePackageResponse;
+
+  try {
+    data = await response.json();
+  } catch {
+    throw new Error(
+      'The server returned an invalid response.'
+    );
+  }
+
+  if (!response.ok || !data.success) {
+    throw new Error(
+      data.error ?? 'Unable to upload package.'
+    );
+  }
+
+  return data;
+}
