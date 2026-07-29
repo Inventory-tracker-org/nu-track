@@ -1,4 +1,12 @@
+import {
+  BarcodeScanningResult,
+  CameraView,
+  useCameraPermissions,
+} from 'expo-camera';
+
+import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
+
 import {
   Alert,
   Button,
@@ -8,20 +16,18 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import {
-  BarcodeScanningResult,
-  CameraView,
-  useCameraPermissions,
-} from 'expo-camera';
-import { router } from 'expo-router';
 
-import { usePackageScan } from '../context/PackageScanContext';
+import { useDelivery } from
+  '../context/DeliveryContext';
 
 const MESSAGE_DURATION = 3000;
 const REPEAT_SCAN_DELAY = 1500;
 
-const isValidPackageBarcode = (value: string): boolean => {
-  const cleanedValue = value.trim();
+const isValidPackageBarcode = (
+  value: string
+): boolean => {
+  const cleanedValue =
+    value.trim().toUpperCase();
 
   if (
     cleanedValue.length < 8 ||
@@ -37,18 +43,14 @@ const isValidPackageBarcode = (value: string): boolean => {
     return false;
   }
 
-  if (!/^[A-Z0-9-]+$/i.test(cleanedValue)) {
+  if (!/^[A-Z0-9-]+$/.test(cleanedValue)) {
     return false;
   }
 
   const digitCount =
     cleanedValue.match(/\d/g)?.length ?? 0;
 
-  if (digitCount < 6) {
-    return false;
-  }
-
-  return true;
+  return digitCount >= 6;
 };
 
 export default function ScanScreen() {
@@ -56,17 +58,20 @@ export default function ScanScreen() {
     useCameraPermissions();
 
   const {
-    barcodes,
+    delivery,
     addBarcode,
-    clearBarcodes,
-  } = usePackageScan();
+    discardCurrentDelivery,
+  } = useDelivery();
 
-  const [message, setMessage] = useState('');
-  const [messageType, setMessageType] =
-    useState<'duplicate' | 'invalid' | null>(null);
+  const barcodes = delivery.barcodes;
+
+  const [message, setMessage] =
+    useState('');
 
   const messageTimerRef =
-    useRef<ReturnType<typeof setTimeout> | null>(null);
+    useRef<ReturnType<
+      typeof setTimeout
+    > | null>(null);
 
   const lastScanRef = useRef<{
     value: string;
@@ -76,43 +81,45 @@ export default function ScanScreen() {
   useEffect(() => {
     return () => {
       if (messageTimerRef.current) {
-        clearTimeout(messageTimerRef.current);
+        clearTimeout(
+          messageTimerRef.current
+        );
       }
     };
   }, []);
 
-  const showTemporaryMessage = (
-    text: string,
-    type: 'duplicate' | 'invalid'
+  const showMessage = (
+    value: string
   ) => {
     if (messageTimerRef.current) {
-      clearTimeout(messageTimerRef.current);
+      clearTimeout(
+        messageTimerRef.current
+      );
     }
 
-    setMessage(text);
-    setMessageType(type);
+    setMessage(value);
 
-    messageTimerRef.current = setTimeout(() => {
-      setMessage('');
-      setMessageType(null);
-      messageTimerRef.current = null;
-    }, MESSAGE_DURATION);
+    messageTimerRef.current =
+      setTimeout(() => {
+        setMessage('');
+      }, MESSAGE_DURATION);
   };
 
-  const leaveScanner = () => {
-    clearBarcodes();
-
-    if (router.canGoBack()) {
-      router.back();
-      return;
-    }
-
+  const leaveAndDiscard = async () => {
+    await discardCurrentDelivery();
     router.replace('/home-screen');
   };
 
   const handleBack = () => {
-    if (barcodes.length === 0) {
-      leaveScanner();
+    const hasAnyInformation =
+      barcodes.length > 0 ||
+      delivery.lastName.trim().length > 0 ||
+      delivery.notes.trim().length > 0 ||
+      Boolean(delivery.photoUri) ||
+      Boolean(delivery.signatureUri);
+
+    if (!hasAnyInformation) {
+      router.replace('/home-screen');
       return;
     }
 
@@ -127,7 +134,7 @@ export default function ScanScreen() {
         {
           text: 'Yes',
           style: 'destructive',
-          onPress: leaveScanner,
+          onPress: leaveAndDiscard,
         },
       ]
     );
@@ -136,7 +143,8 @@ export default function ScanScreen() {
   const handleBarcodeScanned = (
     result: BarcodeScanningResult
   ) => {
-    const scannedValue = result.data.trim();
+    const scannedValue =
+      result.data.trim().toUpperCase();
 
     if (!scannedValue) {
       return;
@@ -148,7 +156,8 @@ export default function ScanScreen() {
     if (
       lastScan &&
       lastScan.value === scannedValue &&
-      now - lastScan.time < REPEAT_SCAN_DELAY
+      now - lastScan.time <
+        REPEAT_SCAN_DELAY
     ) {
       return;
     }
@@ -158,21 +167,23 @@ export default function ScanScreen() {
       time: now,
     };
 
-    if (!isValidPackageBarcode(scannedValue)) {
-      showTemporaryMessage(
-        `"${scannedValue}" does not appear to be a valid package barcode.`,
-        'invalid'
+    if (
+      !isValidPackageBarcode(
+        scannedValue
+      )
+    ) {
+      showMessage(
+        `"${scannedValue}" is not a valid package barcode.`
       );
-
       return;
     }
 
-    if (barcodes.includes(scannedValue)) {
-      showTemporaryMessage(
-        `Package ${scannedValue} has already been scanned.`,
-        'duplicate'
+    if (
+      barcodes.includes(scannedValue)
+    ) {
+      showMessage(
+        `Package ${scannedValue} was already scanned.`
       );
-
       return;
     }
 
@@ -195,7 +206,9 @@ export default function ScanScreen() {
   if (!permission) {
     return (
       <View style={styles.centered}>
-        <Text>Checking camera permission...</Text>
+        <Text>
+          Checking camera permission...
+        </Text>
       </View>
     );
   }
@@ -204,7 +217,8 @@ export default function ScanScreen() {
     return (
       <View style={styles.centered}>
         <Text style={styles.permissionText}>
-          Camera access is required to scan package barcodes.
+          Camera access is required to scan
+          package barcodes.
         </Text>
 
         <Button
@@ -220,17 +234,22 @@ export default function ScanScreen() {
       <CameraView
         style={StyleSheet.absoluteFillObject}
         facing="back"
-        onBarcodeScanned={handleBarcodeScanned}
+        onBarcodeScanned={
+          handleBarcodeScanned
+        }
         barcodeScannerSettings={{
-          barcodeTypes: ['code128', 'code39', 'code93'],
+          barcodeTypes: [
+            'code128',
+            'code39',
+            'code93',
+          ],
         }}
       />
 
       <View style={styles.topBar}>
         <TouchableOpacity
-          style={styles.topButton}
           onPress={handleBack}
-          activeOpacity={0.7}
+          style={styles.topButton}
         >
           <Text style={styles.topButtonText}>
             ‹ Back
@@ -238,31 +257,25 @@ export default function ScanScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity
+          onPress={handleFinish}
           style={[
             styles.finishButton,
             barcodes.length === 0
               ? styles.disabledButton
               : null,
           ]}
-          onPress={handleFinish}
           disabled={barcodes.length === 0}
-          activeOpacity={0.7}
         >
-          <Text style={styles.finishButtonText}>
+          <Text
+            style={styles.finishButtonText}
+          >
             Finish
           </Text>
         </TouchableOpacity>
       </View>
 
       {message ? (
-        <View
-          style={[
-            styles.messageBox,
-            messageType === 'duplicate'
-              ? styles.duplicateMessageBox
-              : styles.invalidMessageBox,
-          ]}
-        >
+        <View style={styles.messageBox}>
           <Text style={styles.messageText}>
             {message}
           </Text>
@@ -271,7 +284,8 @@ export default function ScanScreen() {
 
       <View style={styles.scannerContent}>
         <Text style={styles.instructions}>
-          Position a package barcode inside the frame
+          Position a package barcode inside
+          the frame
         </Text>
 
         <View style={styles.scanFrame} />
@@ -302,11 +316,14 @@ export default function ScanScreen() {
             keyExtractor={(item, index) =>
               `${item}-${index}`
             }
-            style={styles.barcodeList}
-            showsVerticalScrollIndicator={false}
-            renderItem={({ item, index }) => (
+            renderItem={({
+              item,
+              index,
+            }) => (
               <View style={styles.barcodeRow}>
-                <Text style={styles.packageNumber}>
+                <Text
+                  style={styles.packageNumber}
+                >
                   Package {index + 1}
                 </Text>
 
@@ -332,14 +349,14 @@ const styles = StyleSheet.create({
   },
   centered: {
     flex: 1,
-    alignItems: 'center',
     justifyContent: 'center',
+    alignItems: 'center',
     paddingHorizontal: 24,
     backgroundColor: '#ffffff',
   },
   permissionText: {
-    fontSize: 16,
     textAlign: 'center',
+    fontSize: 16,
     marginBottom: 20,
   },
   topBar: {
@@ -349,12 +366,12 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 10,
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
     paddingTop: 54,
     paddingHorizontal: 18,
     paddingBottom: 12,
-    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+    backgroundColor:
+      'rgba(0, 0, 0, 0.55)',
   },
   topButton: {
     paddingVertical: 8,
@@ -373,7 +390,6 @@ const styles = StyleSheet.create({
   },
   finishButtonText: {
     color: '#222222',
-    fontSize: 16,
     fontWeight: '700',
   },
   disabledButton: {
@@ -386,25 +402,18 @@ const styles = StyleSheet.create({
     right: 24,
     zIndex: 20,
     borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 13,
-  },
-  duplicateMessageBox: {
-    backgroundColor: '#9a6700',
-  },
-  invalidMessageBox: {
+    padding: 14,
     backgroundColor: '#b00020',
   },
   messageText: {
     color: '#ffffff',
-    fontSize: 15,
-    fontWeight: '600',
     textAlign: 'center',
+    fontWeight: '600',
   },
   scannerContent: {
     flex: 1,
-    alignItems: 'center',
     justifyContent: 'center',
+    alignItems: 'center',
     paddingHorizontal: 24,
     paddingBottom: 190,
   },
@@ -412,14 +421,7 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 17,
     fontWeight: '600',
-    textAlign: 'center',
     marginBottom: 24,
-    textShadowColor: '#000000',
-    textShadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    textShadowRadius: 3,
   },
   scanFrame: {
     width: '90%',
@@ -430,14 +432,14 @@ const styles = StyleSheet.create({
   },
   countBadge: {
     marginTop: 24,
-    borderRadius: 20,
     paddingHorizontal: 18,
     paddingVertical: 10,
-    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    borderRadius: 20,
+    backgroundColor:
+      'rgba(0, 0, 0, 0.65)',
   },
   countText: {
     color: '#ffffff',
-    fontSize: 15,
     fontWeight: '700',
   },
   scannedPanel: {
@@ -446,9 +448,7 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     maxHeight: 210,
-    paddingTop: 16,
-    paddingHorizontal: 20,
-    paddingBottom: 24,
+    padding: 20,
     backgroundColor: '#ffffff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
@@ -460,11 +460,6 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     color: '#666666',
-    fontSize: 14,
-    paddingBottom: 8,
-  },
-  barcodeList: {
-    maxHeight: 145,
   },
   barcodeRow: {
     borderTopWidth: 1,
@@ -474,7 +469,6 @@ const styles = StyleSheet.create({
   packageNumber: {
     fontSize: 13,
     fontWeight: '700',
-    marginBottom: 2,
   },
   barcodeText: {
     color: '#555555',

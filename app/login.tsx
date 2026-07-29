@@ -99,7 +99,7 @@ export default function LoginScreen() {
       setFailedAttempts(0);
       setPassword('');
 
-      router.replace('/home-screen');
+      router.replace('/');
     } catch (error) {
       setPassword('');
 

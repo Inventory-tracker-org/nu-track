@@ -4,20 +4,19 @@ import { router } from 'expo-router';
 import { useRef, useState } from 'react';
 
 import {
-  ActivityIndicator,
-  Alert,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 
-import SignatureScreenCanvas from
-  'react-native-signature-canvas';
+import SignatureScreenCanvas from 'react-native-signature-canvas';
 
 import {
-  useDelivery,
+    useDelivery,
 } from '../context/DeliveryContext';
 
 type SignatureCanvasHandle = {
@@ -32,7 +31,7 @@ export default function SignatureScreen() {
   const [saving, setSaving] = useState(false);
   const [hasDrawn, setHasDrawn] = useState(false);
 
-  const { setSignatureUri } = useDelivery();
+  const { saveSignature } = useDelivery();
 
   const handleBack = () => {
     if (router.canGoBack()) {
@@ -111,7 +110,7 @@ export default function SignatureScreen() {
         }
       );
 
-      setSignatureUri(signatureUri);
+      await saveSignature(signatureUri);
       router.back();
     } catch (error) {
       const message =

@@ -1,38 +1,65 @@
-import { Redirect } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
+import { Redirect } from 'expo-router';
 import { useEffect, useState } from 'react';
 
 import {
-    ActivityIndicator,
-    StyleSheet,
-    View,
+  ActivityIndicator,
+  StyleSheet,
+  View,
 } from 'react-native';
 
-export default function IndexScreen() {
-  const [loading, setLoading] =
-    useState(true);
+import { useDelivery } from
+  '../context/DeliveryContext';
 
-  const [hasToken, setHasToken] =
-    useState(false);
+type Destination =
+  | '/login'
+  | '/home-screen'
+  | '/package'
+  | null;
+
+export default function IndexScreen() {
+  const {
+    loading: deliveryLoading,
+    recoverActiveDelivery,
+  } = useDelivery();
+
+  const [destination, setDestination] =
+    useState<Destination>(null);
 
   useEffect(() => {
-    const checkToken = async () => {
-      try {
+    if (deliveryLoading) {
+      return;
+    }
+
+    const determineDestination =
+      async () => {
         const token =
           await SecureStore.getItemAsync(
             'token'
           );
 
-        setHasToken(Boolean(token));
-      } finally {
-        setLoading(false);
-      }
-    };
+        if (!token) {
+          setDestination('/login');
+          return;
+        }
 
-    checkToken();
-  }, []);
+        const recovered =
+          await recoverActiveDelivery();
 
-  if (loading) {
+        setDestination(
+          recovered
+            ? '/package'
+            : '/home-screen'
+        );
+      };
+
+    determineDestination();
+  }, [
+    deliveryLoading,
+    recoverActiveDelivery,
+  ]);
+
+  if (!destination) {
     return (
       <View style={styles.container}>
         <ActivityIndicator size="large" />
@@ -40,11 +67,7 @@ export default function IndexScreen() {
     );
   }
 
-  return hasToken ? (
-    <Redirect href="/home-screen" />
-  ) : (
-    <Redirect href="/login" />
-  );
+  return <Redirect href={destination} />;
 }
 
 const styles = StyleSheet.create({

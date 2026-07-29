@@ -1,144 +1,195 @@
-import { router } from 'expo-router';
+
 import * as SecureStore from 'expo-secure-store';
-import { useState } from 'react';
+
+import { router } from 'expo-router';
+import { useCallback, useState } from 'react';
+
 import {
-  ActivityIndicator,
+  Alert,
+  SafeAreaView,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View
+  View,
 } from 'react-native';
 
-const LOGOUT_URL =
-  'https://dataworks-7b7x.onrender.com/api/logout-api.php';
+import { useFocusEffect } from '@react-navigation/native';
+
+import { useDelivery } from '../context/DeliveryContext';
+
+import {
+  getQueuedDeliveries,
+} from '../storage/deliveryStorage';
 
 export default function HomeScreen() {
-  const [loggingOut, setLoggingOut] = useState(false);
+  const { startNewDelivery } =
+    useDelivery();
 
-  const handleLogout = async () => {
-  if (loggingOut) {
-    return;
-  }
+  const [queuedCount, setQueuedCount] =
+    useState(0);
 
-  setLoggingOut(true);
+  useFocusEffect(
+    useCallback(() => {
+      const loadQueueCount = async () => {
+        const queue =
+          await getQueuedDeliveries();
 
-  try {
-    const token = await SecureStore.getItemAsync('token');
+        setQueuedCount(queue.length);
+      };
 
-    if (token) {
-      await fetch(LOGOUT_URL, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: 'application/json',
+      loadQueueCount();
+    }, [])
+  );
+
+  const handleStartScan = async () => {
+    await startNewDelivery();
+    router.push('/scan');
+  };
+
+  const handleSync = () => {
+    router.push('/sync');
+  };
+
+  const handleLogout = () => {
+    Alert.alert(
+      'Log Out',
+      'Are you sure you want to log out?',
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
         },
-      });
-    }
-  } catch (error) {
-    console.warn('Logout API failed:', error);
-  }
+        {
+          text: 'Log Out',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const token =
+                await SecureStore.getItemAsync(
+                  'token'
+                );
 
-  // Always log the user out locally.
-  await SecureStore.deleteItemAsync('token');
+              if (token) {
+                await fetch(
+                  'https://dataworks-7b7x.onrender.com/api/logout-api.php',
+                  {
+                    method: 'POST',
+                    headers: {
+                      Authorization:
+                        `Bearer ${token}`,
+                    },
+                  }
+                );
+              }
+            } catch (error) {
+              console.warn(
+                'Server logout failed:',
+                error
+              );
+            } finally {
+              await SecureStore.deleteItemAsync(
+                'token'
+              );
 
-  router.replace('/login');
-
-  setLoggingOut(false);
-};
+              router.replace('/login');
+            }
+          },
+        },
+      ]
+    );
+  };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.content}>
-        <Text style={styles.title}>Package Tracker</Text>
-
-        <Text style={styles.subtitle}>
-          Choose an action to continue
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.container}>
+        <Text style={styles.title}>
+          Package Tracker
         </Text>
 
         <TouchableOpacity
-          style={styles.button}
-          onPress={() => router.push('/scan')}
-          disabled={loggingOut}
-          activeOpacity={0.8}
+          style={styles.primaryButton}
+          onPress={handleStartScan}
         >
-          <Text style={styles.buttonText}>
+          <Text style={styles.primaryButtonText}>
             Scan Package
           </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={styles.button}
-          onPress={() => router.push('/sync')}
-          disabled={loggingOut}
-          activeOpacity={0.8}
+          style={styles.secondaryButton}
+          onPress={handleSync}
         >
-          <Text style={styles.buttonText}>
+          <Text
+            style={styles.secondaryButtonText}
+          >
             Sync Saved Packages
+            {queuedCount > 0
+              ? ` (${queuedCount})`
+              : ''}
           </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
-          style={[
-            styles.button,
-            styles.logoutButton,
-            loggingOut ? styles.disabledButton : null,
-          ]}
+          style={styles.logoutButton}
           onPress={handleLogout}
-          disabled={loggingOut}
-          activeOpacity={0.8}
         >
-          {loggingOut ? (
-            <ActivityIndicator color="#ffffff" />
-          ) : (
-            <Text style={styles.buttonText}>
-              Logout
-            </Text>
-          )}
+          <Text style={styles.logoutText}>
+            Logout
+          </Text>
         </TouchableOpacity>
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
     backgroundColor: '#ffffff',
+  },
+  container: {
+    flex: 1,
     justifyContent: 'center',
     paddingHorizontal: 24,
-  },
-  content: {
-    width: '100%',
   },
   title: {
     fontSize: 30,
     fontWeight: '700',
     textAlign: 'center',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 16,
-    color: '#555555',
-    textAlign: 'center',
     marginBottom: 40,
   },
-  button: {
+  primaryButton: {
     backgroundColor: '#222222',
     borderRadius: 8,
     paddingVertical: 16,
     alignItems: 'center',
     marginBottom: 16,
   },
-  logoutButton: {
-    backgroundColor: '#b00020',
-    marginTop: 16,
-  },
-  disabledButton: {
-    opacity: 0.6,
-  },
-  buttonText: {
+  primaryButtonText: {
     color: '#ffffff',
     fontSize: 16,
     fontWeight: '700',
+  },
+  secondaryButton: {
+    borderWidth: 1,
+    borderColor: '#222222',
+    borderRadius: 8,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  secondaryButtonText: {
+    color: '#222222',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  logoutButton: {
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  logoutText: {
+    color: '#b00020',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

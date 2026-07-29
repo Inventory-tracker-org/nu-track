@@ -1,14 +1,11 @@
 import { Stack } from 'expo-router';
 
-import { PackageScanProvider } from '../context/PackageScanContext';
-
 import {
   DeliveryProvider,
 } from '../context/DeliveryContext';
 
 export default function RootLayout() {
   return (
-    <PackageScanProvider>
       <DeliveryProvider>
         <Stack
           screenOptions={{
@@ -50,6 +47,5 @@ export default function RootLayout() {
           <Stack.Screen name="signature" />
         </Stack>
       </DeliveryProvider>
-    </PackageScanProvider>
   );
 }

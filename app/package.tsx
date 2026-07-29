@@ -1,84 +1,114 @@
 import * as Location from 'expo-location';
+import * as SecureStore from
+  'expo-secure-store';
+
 import { router } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
 import { useState } from 'react';
 
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    Image,
-    KeyboardAvoidingView,
-    Platform,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
-import { createPackage } from '../api/packages';
-import { useDelivery } from '../context/DeliveryContext';
-import { usePackageScan } from '../context/PackageScanContext';
+import { createPackage } from
+  '../api/packages';
 
-const getCurrentDateAndTime = () => {
+import { useDelivery } from
+  '../context/DeliveryContext';
+
+const getDateAndTime = () => {
   const now = new Date();
 
-  const date = now.toISOString().split('T')[0];
-
-  const time = now.toLocaleTimeString('en-US', {
-    hour12: false,
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
-
   return {
-    date,
-    time,
+    date: now.toISOString().split('T')[0],
+    time: now.toLocaleTimeString(
+      'en-US',
+      {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+      }
+    ),
   };
 };
 
 export default function PackageScreen() {
   const {
-    barcodes,
+    delivery,
+    mode,
     removeBarcode,
-    clearBarcodes,
-  } = usePackageScan();
-
-  const {
-    photoUri,
-    signatureUri,
-    clearDeliveryMedia,
+    setLastName,
+    setNotes,
+    setLocation,
+    queueCurrentDelivery,
+    clearCurrentDeliveryAfterUpload,
   } = useDelivery();
 
-  const [lastName, setLastName] = useState('');
-  const [notes, setNotes] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  const [submitting, setSubmitting] =
+    useState(false);
+
+  const {
+    barcodes,
+    lastName,
+    notes,
+    photoUri,
+    signatureUri,
+  } = delivery;
 
   const handleBack = () => {
+    if (submitting) {
+      return;
+    }
+
+    if (mode === 'recovered') {
+      Alert.alert(
+        'Save for Later',
+        'Save this delivery on the device so it can be synced later?',
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+          },
+          {
+            text: 'Save',
+            onPress: async () => {
+              await queueCurrentDelivery();
+              router.replace(
+                '/home-screen'
+              );
+            },
+          },
+        ]
+      );
+
+      return;
+    }
+
     if (router.canGoBack()) {
       router.back();
-      return;
+    } else {
+      router.replace('/scan');
     }
-
-    router.replace('/scan');
   };
 
-  const handleRemoveBarcode = (
-    indexToRemove: number
+  const handleRemove = (
+    index: number
   ) => {
-    const barcode = barcodes[indexToRemove];
-
-    if (!barcode) {
-      return;
-    }
-
     Alert.alert(
       'Remove Package',
-      `Are you sure you want to remove package ${indexToRemove + 1}?`,
+      `Remove package ${index + 1}?`,
       [
         {
           text: 'Cancel',
@@ -87,49 +117,40 @@ export default function PackageScreen() {
         {
           text: 'Remove',
           style: 'destructive',
-          onPress: () => {
-            removeBarcode(indexToRemove);
-          },
+          onPress: () =>
+            removeBarcode(index),
         },
       ]
     );
   };
 
-  const handleAddPhoto = () => {
-    router.push('/photo');
-  };
-
-  const handleAddSignature = () => {
-    router.push('/signature');
-  };
-
   const getLocation = async () => {
     const permission =
-      await Location.requestForegroundPermissionsAsync();
+      await Location
+        .requestForegroundPermissionsAsync();
 
-    if (permission.status !== 'granted') {
+    if (
+      permission.status !== 'granted'
+    ) {
       return {
         latitude: null,
         longitude: null,
       };
     }
 
-    const currentLocation =
-      await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
+    const result =
+      await Location
+        .getCurrentPositionAsync({
+          accuracy:
+            Location.Accuracy.Balanced,
+        });
 
     return {
-      latitude: currentLocation.coords.latitude,
-      longitude: currentLocation.coords.longitude,
+      latitude:
+        result.coords.latitude,
+      longitude:
+        result.coords.longitude,
     };
-  };
-
-  const resetDelivery = () => {
-    clearBarcodes();
-    clearDeliveryMedia();
-    setLastName('');
-    setNotes('');
   };
 
   const handleSubmit = async () => {
@@ -140,7 +161,7 @@ export default function PackageScreen() {
     if (barcodes.length === 0) {
       Alert.alert(
         'No Packages',
-        'At least one package must be scanned before submitting.'
+        'At least one package is required.'
       );
       return;
     }
@@ -148,7 +169,7 @@ export default function PackageScreen() {
     if (!lastName.trim()) {
       Alert.alert(
         'Last Name Required',
-        'Enter the last name of the person receiving the package.'
+        'Enter the recipient last name.'
       );
       return;
     }
@@ -156,7 +177,7 @@ export default function PackageScreen() {
     if (!photoUri) {
       Alert.alert(
         'Photo Required',
-        'Add a delivery photo before submitting.'
+        'Add a delivery photo.'
       );
       return;
     }
@@ -164,18 +185,20 @@ export default function PackageScreen() {
     if (!signatureUri) {
       Alert.alert(
         'Signature Required',
-        'Capture a recipient signature before submitting.'
+        'Capture the recipient signature.'
       );
       return;
     }
 
     const token =
-      await SecureStore.getItemAsync('token');
+      await SecureStore.getItemAsync(
+        'token'
+      );
 
     if (!token) {
       Alert.alert(
-        'Authentication Required',
-        'Your login session could not be found. Please log in again.'
+        'Login Required',
+        'Please log in again.'
       );
 
       router.replace('/login');
@@ -185,64 +208,53 @@ export default function PackageScreen() {
     setSubmitting(true);
 
     try {
+      const location =
+        await getLocation();
+
+      setLocation(
+        location.latitude,
+        location.longitude
+      );
+
       const { date, time } =
-        getCurrentDateAndTime();
-
-      const {
-        latitude,
-        longitude,
-      } = await getLocation();
-
-      const failedUploads: string[] = [];
+        getDateAndTime();
 
       for (const barcode of barcodes) {
-        try {
-          await createPackage({
-            barcode,
-            date,
-            time,
-            comment: notes.trim(),
-            lastName: lastName.trim(),
-            latitude,
-            longitude,
-            photoUri,
-            signatureUri,
-            token,
-          });
-        } catch (error) {
-          console.error(
-            `Unable to upload package ${barcode}:`,
-            error
-          );
-
-          failedUploads.push(barcode);
-        }
+        await createPackage({
+          barcode,
+          date,
+          time,
+          comment: notes.trim(),
+          lastName: lastName.trim(),
+          latitude:
+            location.latitude,
+          longitude:
+            location.longitude,
+          photoUri,
+          signatureUri,
+          token,
+        });
       }
 
-      if (failedUploads.length > 0) {
-        Alert.alert(
-          'Some Packages Failed',
-          `${failedUploads.length} of ${barcodes.length} packages could not be uploaded. They still need to be saved to the offline queue.`
-        );
+      const uploadedCount =
+        barcodes.length;
 
-        return;
-      }
-
-      resetDelivery();
+      await clearCurrentDeliveryAfterUpload();
 
       Alert.alert(
         'Delivery Submitted',
-        `${barcodes.length} ${
-          barcodes.length === 1
+        `${uploadedCount} ${
+          uploadedCount === 1
             ? 'package was'
             : 'packages were'
         } uploaded successfully.`,
         [
           {
             text: 'OK',
-            onPress: () => {
-              router.replace('/home-screen');
-            },
+            onPress: () =>
+              router.replace(
+                '/home-screen'
+              ),
           },
         ]
       );
@@ -250,11 +262,22 @@ export default function PackageScreen() {
       const message =
         error instanceof Error
           ? error.message
-          : 'Unable to submit the delivery.';
+          : 'Unable to upload the delivery.';
+
+      await queueCurrentDelivery(message);
 
       Alert.alert(
-        'Submission Failed',
-        message
+        'Saved for Sync',
+        `The upload failed, so the delivery was saved on this device.\n\n${message}`,
+        [
+          {
+            text: 'OK',
+            onPress: () =>
+              router.replace(
+                '/home-screen'
+              ),
+          },
+        ]
       );
     } finally {
       setSubmitting(false);
@@ -264,7 +287,7 @@ export default function PackageScreen() {
   return (
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
-        style={styles.keyboardContainer}
+        style={styles.flex}
         behavior={
           Platform.OS === 'ios'
             ? 'padding'
@@ -272,9 +295,8 @@ export default function PackageScreen() {
         }
       >
         <ScrollView
-          style={styles.scrollView}
           contentContainerStyle={
-            styles.scrollContent
+            styles.content
           }
           keyboardShouldPersistTaps="handled"
         >
@@ -282,12 +304,34 @@ export default function PackageScreen() {
             style={styles.backButton}
             onPress={handleBack}
             disabled={submitting}
-            activeOpacity={0.7}
           >
-            <Text style={styles.backButtonText}>
+            <Text style={styles.backText}>
               ‹ Back
             </Text>
           </TouchableOpacity>
+
+          {mode === 'recovered' ? (
+            <View
+              style={styles.recoveredBox}
+            >
+              <Text
+                style={
+                  styles.recoveredTitle
+                }
+              >
+                Unfinished Delivery
+              </Text>
+
+              <Text
+                style={
+                  styles.recoveredText
+                }
+              >
+                This delivery was restored
+                from the device.
+              </Text>
+            </View>
+          ) : null}
 
           <Text style={styles.title}>
             Package Information
@@ -302,70 +346,61 @@ export default function PackageScreen() {
           </Text>
 
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>
+            <Text
+              style={styles.sectionTitle}
+            >
               Scanned Packages
             </Text>
 
-            {barcodes.length === 0 ? (
-              <View style={styles.emptyContainer}>
-                <Text style={styles.errorText}>
-                  No package barcodes remain.
-                </Text>
-
-                <TouchableOpacity
-                  style={styles.secondaryButton}
-                  onPress={handleBack}
-                  activeOpacity={0.8}
+            <FlatList
+              data={barcodes}
+              scrollEnabled={false}
+              keyExtractor={(
+                item,
+                index
+              ) => `${item}-${index}`}
+              renderItem={({
+                item,
+                index,
+              }) => (
+                <View
+                  style={styles.barcodeBox}
                 >
-                  <Text
+                  <View
                     style={
-                      styles.secondaryButtonText
+                      styles.packageHeader
                     }
                   >
-                    Scan Packages
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <FlatList
-                data={barcodes}
-                scrollEnabled={false}
-                keyExtractor={(item, index) =>
-                  `${item}-${index}`
-                }
-                renderItem={({ item, index }) => (
-                  <View style={styles.barcodeBox}>
-                    <View
-                      style={styles.packageHeader}
+                    <Text
+                      style={
+                        styles.packageNumber
+                      }
+                    >
+                      Package {index + 1}
+                    </Text>
+
+                    <TouchableOpacity
+                      onPress={() =>
+                        handleRemove(index)
+                      }
+                      disabled={submitting}
                     >
                       <Text
-                        style={styles.packageNumber}
-                      >
-                        Package {index + 1}
-                      </Text>
-
-                      <TouchableOpacity
-                        onPress={() =>
-                          handleRemoveBarcode(index)
+                        style={
+                          styles.removeText
                         }
-                        disabled={submitting}
-                        activeOpacity={0.7}
                       >
-                        <Text
-                          style={styles.removeText}
-                        >
-                          Remove
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
-
-                    <Text style={styles.barcode}>
-                      {item}
-                    </Text>
+                        Remove
+                      </Text>
+                    </TouchableOpacity>
                   </View>
-                )}
-              />
-            )}
+
+                  <Text style={styles.barcode}>
+                    {item}
+                  </Text>
+                </View>
+              )}
+            />
           </View>
 
           <View style={styles.section}>
@@ -375,13 +410,11 @@ export default function PackageScreen() {
 
             <TextInput
               style={styles.input}
-              placeholder="Enter last name"
               value={lastName}
               onChangeText={setLastName}
+              placeholder="Enter last name"
               autoCapitalize="words"
-              autoCorrect={false}
               editable={!submitting}
-              returnKeyType="next"
               maxLength={100}
             />
 
@@ -394,33 +427,43 @@ export default function PackageScreen() {
                 styles.input,
                 styles.notesInput,
               ]}
-              placeholder="Enter optional delivery notes"
               value={notes}
               onChangeText={setNotes}
+              placeholder="Optional delivery notes"
               multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-              editable={!submitting}
               maxLength={1000}
+              editable={!submitting}
+              textAlignVertical="top"
             />
 
-            <Text style={styles.characterCount}>
+            <Text
+              style={
+                styles.characterCount
+              }
+            >
               {notes.length}/1000
             </Text>
           </View>
 
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>
+            <Text
+              style={styles.sectionTitle}
+            >
               Delivery Confirmation
             </Text>
 
             <TouchableOpacity
               style={styles.actionButton}
-              onPress={handleAddPhoto}
+              onPress={() =>
+                router.push('/photo')
+              }
               disabled={submitting}
-              activeOpacity={0.8}
             >
-              <Text style={styles.actionButtonText}>
+              <Text
+                style={
+                  styles.actionButtonText
+                }
+              >
                 {photoUri
                   ? 'Retake Delivery Photo'
                   : 'Add Delivery Photo'}
@@ -430,22 +473,22 @@ export default function PackageScreen() {
             {photoUri ? (
               <Image
                 source={{ uri: photoUri }}
-                style={styles.previewImage}
-                resizeMode="cover"
+                style={styles.photoPreview}
               />
-            ) : (
-              <Text style={styles.missingText}>
-                No delivery photo added.
-              </Text>
-            )}
+            ) : null}
 
             <TouchableOpacity
               style={styles.actionButton}
-              onPress={handleAddSignature}
+              onPress={() =>
+                router.push('/signature')
+              }
               disabled={submitting}
-              activeOpacity={0.8}
             >
-              <Text style={styles.actionButtonText}>
+              <Text
+                style={
+                  styles.actionButtonText
+                }
+              >
                 {signatureUri
                   ? 'Replace Signature'
                   : 'Capture Signature'}
@@ -454,37 +497,36 @@ export default function PackageScreen() {
 
             {signatureUri ? (
               <Image
-                source={{ uri: signatureUri }}
-                style={styles.signaturePreview}
+                source={{
+                  uri: signatureUri,
+                }}
+                style={
+                  styles.signaturePreview
+                }
                 resizeMode="contain"
               />
-            ) : (
-              <Text style={styles.missingText}>
-                No signature added.
-              </Text>
-            )}
+            ) : null}
           </View>
 
           <TouchableOpacity
             style={[
               styles.submitButton,
-              submitting ||
-              barcodes.length === 0
+              submitting
                 ? styles.disabledButton
                 : null,
             ]}
             onPress={handleSubmit}
-            disabled={
-              submitting ||
-              barcodes.length === 0
-            }
-            activeOpacity={0.8}
+            disabled={submitting}
           >
             {submitting ? (
-              <ActivityIndicator color="#ffffff" />
+              <ActivityIndicator
+                color="#ffffff"
+              />
             ) : (
               <Text
-                style={styles.submitButtonText}
+                style={
+                  styles.submitButtonText
+                }
               >
                 Submit Delivery
               </Text>
@@ -497,17 +539,14 @@ export default function PackageScreen() {
 }
 
 const styles = StyleSheet.create({
+  flex: {
+    flex: 1,
+  },
   safeArea: {
     flex: 1,
     backgroundColor: '#ffffff',
   },
-  keyboardContainer: {
-    flex: 1,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
+  content: {
     paddingHorizontal: 24,
     paddingBottom: 40,
   },
@@ -516,20 +555,33 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingRight: 20,
   },
-  backButtonText: {
+  backText: {
     fontSize: 17,
     fontWeight: '600',
-    color: '#222222',
+  },
+  recoveredBox: {
+    borderWidth: 1,
+    borderColor: '#9a6700',
+    backgroundColor: '#fff8dc',
+    borderRadius: 8,
+    padding: 14,
+    marginBottom: 18,
+  },
+  recoveredTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  recoveredText: {
+    color: '#555555',
   },
   title: {
     fontSize: 28,
     fontWeight: '700',
-    marginTop: 8,
     marginBottom: 8,
   },
   summary: {
     color: '#555555',
-    fontSize: 15,
     marginBottom: 24,
   },
   section: {
@@ -550,7 +602,6 @@ const styles = StyleSheet.create({
   },
   packageHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 6,
   },
@@ -560,12 +611,10 @@ const styles = StyleSheet.create({
   },
   removeText: {
     color: '#b00020',
-    fontSize: 14,
     fontWeight: '600',
   },
   barcode: {
     fontSize: 17,
-    color: '#222222',
   },
   label: {
     fontSize: 15,
@@ -576,21 +625,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#aaaaaa',
     borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    padding: 12,
     fontSize: 16,
-    backgroundColor: '#ffffff',
     marginBottom: 18,
   },
   notesInput: {
     minHeight: 110,
-    paddingTop: 12,
     marginBottom: 5,
   },
   characterCount: {
-    color: '#666666',
-    fontSize: 12,
     textAlign: 'right',
+    color: '#666666',
   },
   actionButton: {
     borderWidth: 1,
@@ -599,19 +644,16 @@ const styles = StyleSheet.create({
     paddingVertical: 15,
     alignItems: 'center',
     marginBottom: 12,
-    backgroundColor: '#ffffff',
   },
   actionButtonText: {
-    color: '#222222',
     fontSize: 16,
     fontWeight: '700',
   },
-  previewImage: {
+  photoPreview: {
     width: '100%',
     height: 200,
     borderRadius: 8,
     marginBottom: 18,
-    backgroundColor: '#eeeeee',
   },
   signaturePreview: {
     width: '100%',
@@ -620,20 +662,12 @@ const styles = StyleSheet.create({
     borderColor: '#dddddd',
     borderRadius: 8,
     marginBottom: 18,
-    backgroundColor: '#ffffff',
-  },
-  missingText: {
-    color: '#777777',
-    fontSize: 14,
-    textAlign: 'center',
-    marginBottom: 18,
   },
   submitButton: {
     backgroundColor: '#222222',
     borderRadius: 8,
     paddingVertical: 16,
     alignItems: 'center',
-    marginTop: 4,
   },
   submitButtonText: {
     color: '#ffffff',
@@ -642,26 +676,5 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.5,
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    paddingVertical: 24,
-  },
-  errorText: {
-    color: '#b00020',
-    fontSize: 14,
-    textAlign: 'center',
-    marginBottom: 18,
-  },
-  secondaryButton: {
-    backgroundColor: '#222222',
-    borderRadius: 8,
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-  },
-  secondaryButtonText: {
-    color: '#ffffff',
-    fontSize: 15,
-    fontWeight: '700',
   },
 });

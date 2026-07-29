@@ -1,25 +1,25 @@
 import {
-  CameraView,
-  useCameraPermissions,
+    CameraView,
+    useCameraPermissions,
 } from 'expo-camera';
 
 import { router } from 'expo-router';
 import { useRef, useState } from 'react';
 
 import {
-  ActivityIndicator,
-  Alert,
-  Button,
-  Image,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    Button,
+    Image,
+    SafeAreaView,
+    StyleSheet,
+    Text,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 
 import {
-  useDelivery,
+    useDelivery,
 } from '../context/DeliveryContext';
 
 export default function PhotoScreen() {
@@ -37,7 +37,7 @@ export default function PhotoScreen() {
   const [takingPhoto, setTakingPhoto] =
     useState(false);
 
-  const { setPhotoUri } = useDelivery();
+  const { savePhoto } = useDelivery();
 
   const handleBack = () => {
     if (router.canGoBack()) {
@@ -89,14 +89,26 @@ export default function PhotoScreen() {
     setPreviewUri(null);
   };
 
-  const handleUsePhoto = () => {
-    if (!previewUri) {
-      return;
-    }
+  const handleUsePhoto = async () => {
+  if (!previewUri) {
+    return;
+  }
 
-    setPhotoUri(previewUri);
+  try {
+    await savePhoto(previewUri);
     router.back();
-  };
+  } catch (error) {
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Unable to save the photo.';
+
+    Alert.alert(
+      'Photo Error',
+      message
+    );
+  }
+};
 
   if (!permission) {
     return (
