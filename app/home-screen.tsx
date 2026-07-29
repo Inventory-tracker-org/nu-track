@@ -3,11 +3,10 @@ import * as SecureStore from 'expo-secure-store';
 import { useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 
 const LOGOUT_URL =
@@ -17,47 +16,35 @@ export default function HomeScreen() {
   const [loggingOut, setLoggingOut] = useState(false);
 
   const handleLogout = async () => {
-    if (loggingOut) {
-      return;
+  if (loggingOut) {
+    return;
+  }
+
+  setLoggingOut(true);
+
+  try {
+    const token = await SecureStore.getItemAsync('token');
+
+    if (token) {
+      await fetch(LOGOUT_URL, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/json',
+        },
+      });
     }
+  } catch (error) {
+    console.warn('Logout API failed:', error);
+  }
 
-    setLoggingOut(true);
+  // Always log the user out locally.
+  await SecureStore.deleteItemAsync('token');
 
-    try {
-      const token = await SecureStore.getItemAsync('token');
+  router.replace('/login');
 
-      if (token) {
-        const response = await fetch(LOGOUT_URL, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: 'application/json',
-          },
-        });
-
-        const data = await response.json();
-
-        if (!response.ok || !data.success) {
-          throw new Error(
-            data.error ?? 'The server could not complete logout.'
-          );
-        }
-      }
-
-      await SecureStore.deleteItemAsync('token');
-
-      router.replace('/login');
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : 'Unable to log out.';
-
-      Alert.alert('Logout Failed', message);
-    } finally {
-      setLoggingOut(false);
-    }
-  };
+  setLoggingOut(false);
+};
 
   return (
     <View style={styles.container}>

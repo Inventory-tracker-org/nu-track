@@ -19,19 +19,6 @@ export default function HomeScreen() {
     <View style={styles.container}>
       <Text style={styles.title}>Package Tracker</Text>
 
-      <TouchableOpacity
-        style={styles.button}
-        onPress={() => router.push('/(tabs)/scan')}
-      >
-        <Text style={styles.buttonText}>Scan Package</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity
-        style={styles.button}
-        onPress={() => router.push('/(tabs)/sync')}
-      >
-        <Text style={styles.buttonText}>Sync Saved Packages</Text>
-      </TouchableOpacity>
 
       <TouchableOpacity
         style={[styles.button, styles.logoutButton]}
