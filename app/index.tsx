@@ -1,35 +1,53 @@
 import { Redirect } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { useEffect, useState } from 'react';
-import { ActivityIndicator, View } from 'react-native';
+import {
+    ActivityIndicator,
+    StyleSheet,
+    View,
+} from 'react-native';
 
-export default function Index() {
-    const [loading, setLoading] = useState(true);
-    const [token, setToken] = useState<string | null>(null);
+export default function IndexScreen() {
+  const [loading, setLoading] = useState(true);
+  const [hasToken, setHasToken] = useState(false);
 
-    useEffect(() => {
-        async function checkToken() {
-            const storedToken =
-                await SecureStore.getItemAsync("token");
+  useEffect(() => {
+    const checkAuthentication = async () => {
+      try {
+        const token = await SecureStore.getItemAsync('token');
 
-            setToken(storedToken);
-            setLoading(false);
-        }
+        setHasToken(Boolean(token));
+      } catch (error) {
+        console.error('Unable to read authentication token:', error);
+        setHasToken(false);
+      } finally {
+        setLoading(false);
+      }
+    };
 
-        checkToken();
-    }, []);
+    checkAuthentication();
+  }, []);
 
-    if (loading) {
-        return (
-            <View>
-                <ActivityIndicator />
-            </View>
-        );
-    }
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
 
-    if (token) {
-        return <Redirect href="/(tabs)" />;
-    }
+  if (hasToken) {
+    return <Redirect href="/home-screen" />;
+  }
 
-    return <Redirect href="/login" />;
+  return <Redirect href="/login" />;
 }
+
+const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffffff',
+  },
+});

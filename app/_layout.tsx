@@ -5,23 +5,32 @@ export default function RootLayout() {
     <Stack>
       <Stack.Screen
         name="index"
-        options={{
-          headerShown: false,
-        }}
+        options={{ headerShown: false }}
       />
 
       <Stack.Screen
         name="login"
-        options={{
-          headerShown: false,
-        }}
+        options={{ headerShown: false }}
       />
 
       <Stack.Screen
-        name="(tabs)"
-        options={{
-          headerShown: false,
-        }}
+        name="home-screen"
+        options={{ headerShown: false }}
+      />
+
+      <Stack.Screen
+        name="scan"
+        options={{ title: 'Scan Package' }}
+      />
+
+      <Stack.Screen
+        name="package"
+        options={{ title: 'Package Information' }}
+      />
+
+      <Stack.Screen
+        name="sync"
+        options={{ title: 'Saved Packages' }}
       />
     </Stack>
   );
