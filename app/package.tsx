@@ -1,5 +1,8 @@
 import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useState } from 'react';
 import {
+    Alert,
+    FlatList,
     SafeAreaView,
     StyleSheet,
     Text,
@@ -8,23 +11,81 @@ import {
 } from 'react-native';
 
 export default function PackageScreen() {
-  const { barcode } = useLocalSearchParams<{
-    barcode?: string | string[];
+  const { barcodes } = useLocalSearchParams<{
+    barcodes?: string | string[];
   }>();
 
-  // Search parameters can technically be strings or arrays.
-  const scannedBarcode = Array.isArray(barcode)
-    ? barcode[0]
-    : barcode;
+  const [scannedBarcodes, setScannedBarcodes] =
+    useState<string[]>([]);
+
+  useEffect(() => {
+    try {
+      const barcodeParameter = Array.isArray(barcodes)
+        ? barcodes[0]
+        : barcodes;
+
+      const parsedBarcodes = JSON.parse(
+        barcodeParameter ?? '[]'
+      );
+
+      if (!Array.isArray(parsedBarcodes)) {
+        setScannedBarcodes([]);
+        return;
+      }
+
+      setScannedBarcodes(
+        parsedBarcodes.filter(
+          (barcode): barcode is string =>
+            typeof barcode === 'string'
+        )
+      );
+    } catch {
+      setScannedBarcodes([]);
+    }
+  }, [barcodes]);
 
   const handleBack = () => {
-    if (router.canGoBack()) {
-      router.push('/scan');
+  router.replace({
+    pathname: '/scan',
+    params: {
+      savedBarcodes: JSON.stringify(scannedBarcodes),
+    },
+  });
+};
+
+  const handleRemoveBarcode = (
+    indexToRemove: number
+  ) => {
+    const barcodeToRemove =
+      scannedBarcodes[indexToRemove];
+
+    if (!barcodeToRemove) {
       return;
     }
 
-    // Fallback in case this page was opened without navigation history.
-    router.replace('/home-screen');
+    Alert.alert(
+      'Remove Package',
+      `Remove package ${indexToRemove + 1}?`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: () => {
+            setScannedBarcodes(
+              (currentBarcodes) =>
+                currentBarcodes.filter(
+                  (_, index) =>
+                    index !== indexToRemove
+                )
+            );
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -35,26 +96,72 @@ export default function PackageScreen() {
           onPress={handleBack}
           activeOpacity={0.7}
         >
-          <Text style={styles.backButtonText}>‹ Back</Text>
+          <Text style={styles.backButtonText}>
+            ‹ Back
+          </Text>
         </TouchableOpacity>
 
         <View style={styles.content}>
-          <Text style={styles.title}>Package Information</Text>
+          <Text style={styles.title}>
+            Package Information
+          </Text>
 
-          <Text style={styles.label}>Scanned Barcode</Text>
+          <Text style={styles.summary}>
+            {scannedBarcodes.length}{' '}
+            {scannedBarcodes.length === 1
+              ? 'package'
+              : 'packages'}{' '}
+            scanned
+          </Text>
 
-          <View style={styles.barcodeBox}>
-            <Text style={styles.barcode}>
-              {scannedBarcode ?? 'No barcode received'}
-            </Text>
-          </View>
+          <FlatList
+            data={scannedBarcodes}
+            keyExtractor={(item, index) =>
+              `${item}-${index}`
+            }
+            showsVerticalScrollIndicator={false}
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Text style={styles.errorText}>
+                  No package barcodes remain.
+                </Text>
 
-          {!scannedBarcode ? (
-            <Text style={styles.errorText}>
-              A barcode was not passed to this screen. Go back and scan the
-              package again.
-            </Text>
-          ) : null}
+                <TouchableOpacity
+                  style={styles.scanAgainButton}
+                  onPress={handleBack}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.scanAgainText}>
+                    Scan Packages
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            }
+            renderItem={({ item, index }) => (
+              <View style={styles.barcodeBox}>
+                <View style={styles.packageHeader}>
+                  <Text style={styles.packageNumber}>
+                    Package {index + 1}
+                  </Text>
+
+                  <TouchableOpacity
+                    onPress={() =>
+                      handleRemoveBarcode(index)
+                    }
+                    activeOpacity={0.7}
+                  >
+                    <Text style={styles.removeText}>
+                      Remove
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                <Text style={styles.barcode}>
+                  {item}
+                </Text>
+              </View>
+            )}
+          />
         </View>
       </View>
     </SafeAreaView>
@@ -88,27 +195,59 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: '700',
-    marginBottom: 32,
-  },
-  label: {
-    fontSize: 15,
-    fontWeight: '600',
     marginBottom: 8,
+  },
+  summary: {
+    color: '#555555',
+    fontSize: 15,
+    marginBottom: 24,
   },
   barcodeBox: {
     borderWidth: 1,
     borderColor: '#aaaaaa',
     borderRadius: 8,
     padding: 14,
+    marginBottom: 12,
     backgroundColor: '#f7f7f7',
   },
+  packageHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  packageNumber: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  removeText: {
+    color: '#b00020',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   barcode: {
-    fontSize: 18,
+    fontSize: 17,
     color: '#222222',
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    paddingTop: 32,
   },
   errorText: {
     color: '#b00020',
     fontSize: 14,
-    marginTop: 12,
+    textAlign: 'center',
+    marginBottom: 18,
+  },
+  scanAgainButton: {
+    backgroundColor: '#222222',
+    borderRadius: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+  },
+  scanAgainText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '700',
   },
 });
