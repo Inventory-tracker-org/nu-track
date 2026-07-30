@@ -1,6 +1,14 @@
-import * as SecureStore from 'expo-secure-store';
-import { Redirect } from 'expo-router';
-import { useEffect, useState } from 'react';
+import * as SecureStore from
+  'expo-secure-store';
+
+import {
+  Redirect,
+} from 'expo-router';
+
+import {
+  useEffect,
+  useState,
+} from 'react';
 
 import {
   ActivityIndicator,
@@ -8,8 +16,13 @@ import {
   View,
 } from 'react-native';
 
-import { useDelivery } from
-  '../context/DeliveryContext';
+import {
+  useDelivery,
+} from '../context/DeliveryContext';
+
+import {
+  getCurrentAccountKey,
+} from '../storage/accountStorage';
 
 type Destination =
   | '/login'
@@ -19,32 +32,49 @@ type Destination =
 
 export default function IndexScreen() {
   const {
-    loading: deliveryLoading,
     recoverActiveDelivery,
   } = useDelivery();
 
-  const [destination, setDestination] =
-    useState<Destination>(null);
+  const [
+    destination,
+    setDestination,
+  ] = useState<Destination>(
+    null
+  );
 
   useEffect(() => {
-    if (deliveryLoading) {
-      return;
-    }
+    let active = true;
 
     const determineDestination =
       async () => {
         const token =
-          await SecureStore.getItemAsync(
-            'token'
+          await SecureStore
+            .getItemAsync('token');
+
+        const accountKey =
+          await getCurrentAccountKey();
+
+        if (!active) {
+          return;
+        }
+
+        if (
+          !token ||
+          !accountKey
+        ) {
+          setDestination(
+            '/login'
           );
 
-        if (!token) {
-          setDestination('/login');
           return;
         }
 
         const recovered =
           await recoverActiveDelivery();
+
+        if (!active) {
+          return;
+        }
 
         setDestination(
           recovered
@@ -53,28 +83,51 @@ export default function IndexScreen() {
         );
       };
 
-    determineDestination();
-  }, [
-    deliveryLoading,
-    recoverActiveDelivery,
-  ]);
+    determineDestination().catch(
+      (error) => {
+        console.error(
+          'Startup error:',
+          error
+        );
+
+        if (active) {
+          setDestination(
+            '/login'
+          );
+        }
+      }
+    );
+
+    return () => {
+      active = false;
+    };
+  }, [recoverActiveDelivery]);
 
   if (!destination) {
     return (
       <View style={styles.container}>
-        <ActivityIndicator size="large" />
+        <ActivityIndicator
+          size="large"
+        />
       </View>
     );
   }
 
-  return <Redirect href={destination} />;
+  return (
+    <Redirect
+      href={destination}
+    />
+  );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#ffffff',
-  },
-});
+const styles =
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent:
+        'center',
+      backgroundColor:
+        '#ffffff',
+    },
+  });

@@ -16,6 +16,14 @@ import {
 
 import { loginUser } from '../api/auth';
 
+import {
+  saveCurrentAccountKey,
+} from '../storage/accountStorage';
+
+import {
+  useDelivery,
+} from '../context/DeliveryContext';
+
 const MAX_LOGIN_ATTEMPTS = 4;
 
 const validateEmail = (email: string): string => {
@@ -41,6 +49,9 @@ const validatePassword = (password: string): string => {
 };
 
 export default function LoginScreen() {
+  const {
+  releaseCurrentAccount,
+} = useDelivery();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
@@ -87,6 +98,10 @@ export default function LoginScreen() {
         token
       );
 
+      await saveCurrentAccountKey(
+  email
+);
+
       const savedToken =
         await SecureStore.getItemAsync('token');
 
@@ -96,6 +111,7 @@ export default function LoginScreen() {
         );
       }
 
+      releaseCurrentAccount();
       setFailedAttempts(0);
       setPassword('');
 

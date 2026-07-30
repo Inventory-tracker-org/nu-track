@@ -1,31 +1,28 @@
 import * as Location from 'expo-location';
-import * as SecureStore from
-  'expo-secure-store';
+import * as SecureStore from 'expo-secure-store';
 
 import { router } from 'expo-router';
 import { useState } from 'react';
 
 import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Image,
-  KeyboardAvoidingView,
-  Platform,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Image,
+    KeyboardAvoidingView,
+    Platform,
+    SafeAreaView,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 
-import { createPackage } from
-  '../api/packages';
+import { createPackage } from '../api/packages';
 
-import { useDelivery } from
-  '../context/DeliveryContext';
+import { useDelivery } from '../context/DeliveryContext';
 
 const getDateAndTime = () => {
   const now = new Date();
@@ -173,7 +170,7 @@ export default function PackageScreen() {
       );
       return;
     }
-
+/*
     if (!photoUri) {
       Alert.alert(
         'Photo Required',
@@ -181,7 +178,7 @@ export default function PackageScreen() {
       );
       return;
     }
-
+*/
     if (!signatureUri) {
       Alert.alert(
         'Signature Required',

@@ -1,6 +1,4 @@
-
 import * as SecureStore from 'expo-secure-store';
-
 import { router } from 'expo-router';
 import { useCallback, useState } from 'react';
 
@@ -21,29 +19,70 @@ import {
   getQueuedDeliveries,
 } from '../storage/deliveryStorage';
 
+import {
+  removeCurrentAccountKey,
+} from '../storage/accountStorage';
+
 export default function HomeScreen() {
-  const { startNewDelivery } =
-    useDelivery();
+  /*
+   * Only call useDelivery once.
+   * Both functions are pulled from the same call.
+   */
+  const {
+    startNewDelivery,
+    releaseCurrentAccount,
+  } = useDelivery();
 
   const [queuedCount, setQueuedCount] =
     useState(0);
 
   useFocusEffect(
     useCallback(() => {
-      const loadQueueCount = async () => {
-        const queue =
-          await getQueuedDeliveries();
+      let screenIsActive = true;
 
-        setQueuedCount(queue.length);
+      const loadQueueCount = async () => {
+        try {
+          const queue =
+            await getQueuedDeliveries();
+
+          if (screenIsActive) {
+            setQueuedCount(queue.length);
+          }
+        } catch (error) {
+          console.error(
+            'Unable to load saved deliveries:',
+            error
+          );
+
+          if (screenIsActive) {
+            setQueuedCount(0);
+          }
+        }
       };
 
       loadQueueCount();
+
+      return () => {
+        screenIsActive = false;
+      };
     }, [])
   );
 
   const handleStartScan = async () => {
-    await startNewDelivery();
-    router.push('/scan');
+    try {
+      await startNewDelivery();
+      router.push('/scan');
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : 'Unable to start a new delivery.';
+
+      Alert.alert(
+        'Unable to Start Scan',
+        message
+      );
+    }
   };
 
   const handleSync = () => {
@@ -82,14 +121,28 @@ export default function HomeScreen() {
                 );
               }
             } catch (error) {
+              /*
+               * A failed server logout should not
+               * prevent local logout.
+               */
               console.warn(
                 'Server logout failed:',
                 error
               );
             } finally {
+              /*
+               * Remove the previous account's
+               * delivery information from React memory.
+               * This does not delete that account's
+               * account-scoped saved deliveries.
+               */
+              releaseCurrentAccount();
+
               await SecureStore.deleteItemAsync(
                 'token'
               );
+
+              await removeCurrentAccountKey();
 
               router.replace('/login');
             }
@@ -109,6 +162,7 @@ export default function HomeScreen() {
         <TouchableOpacity
           style={styles.primaryButton}
           onPress={handleStartScan}
+          activeOpacity={0.8}
         >
           <Text style={styles.primaryButtonText}>
             Scan Package
@@ -118,10 +172,9 @@ export default function HomeScreen() {
         <TouchableOpacity
           style={styles.secondaryButton}
           onPress={handleSync}
+          activeOpacity={0.8}
         >
-          <Text
-            style={styles.secondaryButtonText}
-          >
+          <Text style={styles.secondaryButtonText}>
             Sync Saved Packages
             {queuedCount > 0
               ? ` (${queuedCount})`
@@ -132,6 +185,7 @@ export default function HomeScreen() {
         <TouchableOpacity
           style={styles.logoutButton}
           onPress={handleLogout}
+          activeOpacity={0.8}
         >
           <Text style={styles.logoutText}>
             Logout

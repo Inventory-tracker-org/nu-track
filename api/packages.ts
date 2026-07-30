@@ -6,7 +6,7 @@ type CreatePackageInput = {
   lastName: string;
   latitude: number | null;
   longitude: number | null;
-  photoUri: string;
+  photoUri: string | null;
   signatureUri: string;
   token: string;
 };
@@ -43,6 +43,7 @@ export async function createPackage(
     );
   }
 
+if (input.photoUri) {
   formData.append(
     'photo',
     {
@@ -51,6 +52,7 @@ export async function createPackage(
       type: 'image/jpeg',
     } as any
   );
+}
 
   formData.append(
     'signature',

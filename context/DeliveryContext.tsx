@@ -9,6 +9,15 @@ import {
 } from 'react';
 
 import {
+  Image,
+} from 'react-native';
+
+import {
+  manipulateAsync,
+  SaveFormat,
+} from 'expo-image-manipulator';
+
+import {
   addDeliveryToQueue,
   deleteDeliveryFiles,
   getActiveDelivery,
@@ -24,30 +33,60 @@ import {
   StoredDelivery,
 } from '../types/delivery';
 
+const MAX_PHOTO_WIDTH = 1600;
+const PHOTO_COMPRESSION = 0.65;
+
 type DeliveryContextValue = {
   delivery: StoredDelivery;
   mode: DeliveryMode;
   loading: boolean;
   hasActiveDelivery: boolean;
 
-  setMode: (mode: DeliveryMode) => void;
-  startNewDelivery: () => Promise<void>;
-  recoverActiveDelivery: () => Promise<boolean>;
+  setMode: (
+    mode: DeliveryMode
+  ) => void;
 
-  addBarcode: (barcode: string) => boolean;
-  removeBarcode: (index: number) => void;
+  startNewDelivery:
+    () => Promise<void>;
 
-  setLastName: (value: string) => void;
-  setNotes: (value: string) => void;
+  recoverActiveDelivery:
+    () => Promise<boolean>;
+
+  releaseCurrentAccount:
+    () => void;
+
+  addBarcode: (
+    barcode: string
+  ) => boolean;
+
+  removeBarcode: (
+    index: number
+  ) => void;
+
+  setLastName: (
+    value: string
+  ) => void;
+
+  setNotes: (
+    value: string
+  ) => void;
+
   setLocation: (
     latitude: number | null,
     longitude: number | null
   ) => void;
 
-  savePhoto: (uri: string) => Promise<void>;
-  saveSignature: (uri: string) => Promise<void>;
+  savePhoto: (
+    uri: string
+  ) => Promise<void>;
 
-  discardCurrentDelivery: () => Promise<void>;
+  saveSignature: (
+    uri: string
+  ) => Promise<void>;
+
+  discardCurrentDelivery:
+    () => Promise<void>;
+
   queueCurrentDelivery: (
     error?: string
   ) => Promise<void>;
@@ -57,11 +96,87 @@ type DeliveryContextValue = {
 };
 
 const DeliveryContext =
-  createContext<DeliveryContextValue | null>(null);
+  createContext<
+    DeliveryContextValue | null
+  >(null);
 
 type DeliveryProviderProps = {
   children: ReactNode;
 };
+
+const getImageDimensions = (
+  uri: string
+): Promise<{
+  width: number;
+  height: number;
+}> => {
+  return new Promise(
+    (resolve, reject) => {
+      Image.getSize(
+        uri,
+        (width, height) => {
+          resolve({
+            width,
+            height,
+          });
+        },
+        (error) => {
+          reject(error);
+        }
+      );
+    }
+  );
+};
+
+const compressDeliveryPhoto =
+  async (
+    uri: string
+  ): Promise<string> => {
+    let actions:
+      {
+        resize: {
+          width: number;
+        };
+      }[] = [];
+
+    try {
+      const dimensions =
+        await getImageDimensions(uri);
+
+      if (
+        dimensions.width >
+        MAX_PHOTO_WIDTH
+      ) {
+        actions = [
+          {
+            resize: {
+              width:
+                MAX_PHOTO_WIDTH,
+            },
+          },
+        ];
+      }
+    } catch (error) {
+      console.warn(
+        'Unable to read photo dimensions:',
+        error
+      );
+    }
+
+    const compressedImage =
+      await manipulateAsync(
+        uri,
+        actions,
+        {
+          compress:
+            PHOTO_COMPRESSION,
+          format:
+            SaveFormat.JPEG,
+        }
+      );
+
+    return compressedImage.uri;
+  };
 
 export function DeliveryProvider({
   children,
@@ -72,43 +187,31 @@ export function DeliveryProvider({
     );
 
   const [mode, setMode] =
-    useState<DeliveryMode>('normal');
+    useState<DeliveryMode>(
+      'normal'
+    );
 
   const [loading, setLoading] =
-    useState(true);
-
-  const [hydrated, setHydrated] =
     useState(false);
 
-  const hydrate = useCallback(async () => {
-    try {
-      const storedDelivery =
-        await getActiveDelivery();
-
-      if (
-        storedDelivery &&
-        deliveryHasInformation(storedDelivery)
-      ) {
-        setDelivery(storedDelivery);
-      }
-    } finally {
-      setHydrated(true);
-      setLoading(false);
-    }
-  }, []);
+  const [persistenceEnabled,
+    setPersistenceEnabled] =
+    useState(false);
 
   useEffect(() => {
-    hydrate();
-  }, [hydrate]);
-
-  useEffect(() => {
-    if (!hydrated) {
+    if (!persistenceEnabled) {
       return;
     }
 
     const persist = async () => {
-      if (deliveryHasInformation(delivery)) {
-        await saveActiveDelivery(delivery);
+      if (
+        deliveryHasInformation(
+          delivery
+        )
+      ) {
+        await saveActiveDelivery(
+          delivery
+        );
       } else {
         await removeActiveDelivery();
       }
@@ -120,48 +223,104 @@ export function DeliveryProvider({
         error
       );
     });
-  }, [delivery, hydrated]);
+  }, [
+    delivery,
+    persistenceEnabled,
+  ]);
 
-  const startNewDelivery = async () => {
-    const previousDelivery = delivery;
+  const startNewDelivery =
+    async (): Promise<void> => {
+      const previousDelivery =
+        delivery;
 
-    await removeActiveDelivery();
-
-    if (
-      !deliveryHasInformation(previousDelivery)
-    ) {
-      await deleteDeliveryFiles(
-        previousDelivery.id
-      );
-    }
-
-    setDelivery(createEmptyDelivery());
-    setMode('normal');
-  };
-
-  const recoverActiveDelivery =
-    async (): Promise<boolean> => {
-      const storedDelivery =
-        await getActiveDelivery();
+      await removeActiveDelivery();
 
       if (
-        !storedDelivery ||
-        !deliveryHasInformation(storedDelivery)
+        !deliveryHasInformation(
+          previousDelivery
+        )
       ) {
-        return false;
+        await deleteDeliveryFiles(
+          previousDelivery.id
+        );
       }
 
-      setDelivery(storedDelivery);
-      setMode('recovered');
+      setDelivery(
+        createEmptyDelivery()
+      );
 
-      return true;
+      setMode('normal');
+      setPersistenceEnabled(true);
     };
+
+  const recoverActiveDelivery =
+    useCallback(
+      async (): Promise<boolean> => {
+        setLoading(true);
+
+        try {
+          const storedDelivery =
+            await getActiveDelivery();
+
+          if (
+            !storedDelivery ||
+            !deliveryHasInformation(
+              storedDelivery
+            )
+          ) {
+            setDelivery(
+              createEmptyDelivery()
+            );
+
+            setMode('normal');
+            setPersistenceEnabled(
+              true
+            );
+
+            return false;
+          }
+
+          setDelivery(
+            storedDelivery
+          );
+
+          setMode('recovered');
+          setPersistenceEnabled(true);
+
+          return true;
+        } finally {
+          setLoading(false);
+        }
+      },
+      []
+    );
+
+  /*
+   * Clears only the React state.
+   * It does not delete the current
+   * account's saved delivery or queue.
+   *
+   * Use this during logout so another
+   * account cannot see the previous
+   * account's in-memory information.
+   */
+  const releaseCurrentAccount = () => {
+    setPersistenceEnabled(false);
+
+    setDelivery(
+      createEmptyDelivery()
+    );
+
+    setMode('normal');
+  };
 
   const addBarcode = (
     barcode: string
   ): boolean => {
     const cleanedBarcode =
-      barcode.trim().toUpperCase();
+      barcode
+        .trim()
+        .toUpperCase();
 
     if (
       !cleanedBarcode ||
@@ -183,24 +342,31 @@ export function DeliveryProvider({
     return true;
   };
 
-  const removeBarcode = (index: number) => {
+  const removeBarcode = (
+    index: number
+  ) => {
     setDelivery((current) => ({
       ...current,
-      barcodes: current.barcodes.filter(
-        (_, itemIndex) =>
-          itemIndex !== index
-      ),
+      barcodes:
+        current.barcodes.filter(
+          (_, itemIndex) =>
+            itemIndex !== index
+        ),
     }));
   };
 
-  const setLastName = (value: string) => {
+  const setLastName = (
+    value: string
+  ) => {
     setDelivery((current) => ({
       ...current,
       lastName: value,
     }));
   };
 
-  const setNotes = (value: string) => {
+  const setNotes = (
+    value: string
+  ) => {
     setDelivery((current) => ({
       ...current,
       notes: value,
@@ -220,23 +386,29 @@ export function DeliveryProvider({
 
   const savePhoto = async (
     uri: string
-  ) => {
+  ): Promise<void> => {
+    const compressedUri =
+      await compressDeliveryPhoto(
+        uri
+      );
+
     const persistedUri =
       await persistDeliveryFile(
-        uri,
+        compressedUri,
         delivery.id,
         'photo'
       );
 
     setDelivery((current) => ({
       ...current,
-      photoUri: persistedUri,
+      photoUri:
+        persistedUri,
     }));
   };
 
   const saveSignature = async (
     uri: string
-  ) => {
+  ): Promise<void> => {
     const persistedUri =
       await persistDeliveryFile(
         uri,
@@ -246,50 +418,78 @@ export function DeliveryProvider({
 
     setDelivery((current) => ({
       ...current,
-      signatureUri: persistedUri,
+      signatureUri:
+        persistedUri,
     }));
   };
 
   const discardCurrentDelivery =
-    async () => {
-      const discardedId = delivery.id;
+    async (): Promise<void> => {
+      const discardedId =
+        delivery.id;
+
+      setPersistenceEnabled(false);
 
       await removeActiveDelivery();
+
       await deleteDeliveryFiles(
         discardedId
       );
 
-      setDelivery(createEmptyDelivery());
+      setDelivery(
+        createEmptyDelivery()
+      );
+
       setMode('normal');
+      setPersistenceEnabled(true);
     };
 
-  const queueCurrentDelivery = async (
-    error?: string
-  ) => {
-    if (deliveryHasInformation(delivery)) {
-      await addDeliveryToQueue(
-        delivery,
-        error
-      );
-    }
+  const queueCurrentDelivery =
+    async (
+      error?: string
+    ): Promise<void> => {
+      setPersistenceEnabled(false);
 
-    await removeActiveDelivery();
-
-    setDelivery(createEmptyDelivery());
-    setMode('normal');
-  };
-
-  const clearCurrentDeliveryAfterUpload =
-    async () => {
-      const completedId = delivery.id;
+      if (
+        deliveryHasInformation(
+          delivery
+        )
+      ) {
+        await addDeliveryToQueue(
+          delivery,
+          error
+        );
+      }
 
       await removeActiveDelivery();
+
+      setDelivery(
+        createEmptyDelivery()
+      );
+
+      setMode('normal');
+      setPersistenceEnabled(true);
+    };
+
+  const clearCurrentDeliveryAfterUpload =
+    async (): Promise<void> => {
+      const completedId =
+        delivery.id;
+
+      setPersistenceEnabled(false);
+
+      await removeActiveDelivery();
+
       await deleteDeliveryFiles(
         completedId
       );
 
-      setDelivery(createEmptyDelivery());
+      setDelivery(
+        createEmptyDelivery()
+      );
+
       setMode('normal');
+      setPersistenceEnabled(true);
     };
 
   const value = useMemo(
@@ -297,12 +497,16 @@ export function DeliveryProvider({
       delivery,
       mode,
       loading,
+
       hasActiveDelivery:
-        deliveryHasInformation(delivery),
+        deliveryHasInformation(
+          delivery
+        ),
 
       setMode,
       startNewDelivery,
       recoverActiveDelivery,
+      releaseCurrentAccount,
 
       addBarcode,
       removeBarcode,
@@ -318,20 +522,28 @@ export function DeliveryProvider({
       queueCurrentDelivery,
       clearCurrentDeliveryAfterUpload,
     }),
-    [delivery, mode, loading]
+    [
+      delivery,
+      mode,
+      loading,
+      recoverActiveDelivery,
+    ]
   );
 
   return (
-    <DeliveryContext.Provider value={value}>
+    <DeliveryContext.Provider
+      value={value}
+    >
       {children}
     </DeliveryContext.Provider>
   );
 }
 
 export function useDelivery() {
-  const context = useContext(
-    DeliveryContext
-  );
+  const context =
+    useContext(
+      DeliveryContext
+    );
 
   if (!context) {
     throw new Error(

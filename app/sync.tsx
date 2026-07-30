@@ -89,10 +89,7 @@ export default function SyncScreen() {
     delivery: QueuedDelivery,
     token: string
   ) => {
-    if (
-      !delivery.photoUri ||
-      !delivery.signatureUri
-    ) {
+    if (!delivery.signatureUri) {
       throw new Error(
         'The saved delivery is missing its photo or signature.'
       );

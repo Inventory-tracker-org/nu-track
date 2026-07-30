@@ -5,7 +5,11 @@ import {
 } from 'expo-camera';
 
 import { router } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 
 import {
   Alert,
@@ -23,7 +27,20 @@ import { useDelivery } from
 const MESSAGE_DURATION = 3000;
 const REPEAT_SCAN_DELAY = 1500;
 
-const isValidPackageBarcode = (
+type ScanMode =
+  | 'standard'
+  | 'custom';
+
+/*
+ * Standard package validation.
+ *
+ * This keeps your existing restrictions:
+ * - Between 8 and 40 characters
+ * - No URLs
+ * - Only letters, numbers, and hyphens
+ * - At least six digits
+ */
+const isValidStandardBarcode = (
   value: string
 ): boolean => {
   const cleanedValue =
@@ -53,6 +70,27 @@ const isValidPackageBarcode = (
   return digitCount >= 6;
 };
 
+/*
+ * Custom package validation.
+ *
+ * Accepted format:
+ *
+ * C1|123456789
+ *
+ * The value must:
+ * - Start with C1|
+ * - Contain only digits after the pipe
+ * - Contain at least one digit
+ */
+const isValidCustomBarcode = (
+  value: string
+): boolean => {
+  const cleanedValue =
+    value.trim().toUpperCase();
+
+  return /^C1\|\d+$/.test(cleanedValue);
+};
+
 export default function ScanScreen() {
   const [permission, requestPermission] =
     useCameraPermissions();
@@ -65,6 +103,9 @@ export default function ScanScreen() {
 
   const barcodes = delivery.barcodes;
 
+  const [scanMode, setScanMode] =
+    useState<ScanMode>('standard');
+
   const [message, setMessage] =
     useState('');
 
@@ -75,6 +116,7 @@ export default function ScanScreen() {
 
   const lastScanRef = useRef<{
     value: string;
+    mode: ScanMode;
     time: number;
   } | null>(null);
 
@@ -102,12 +144,36 @@ export default function ScanScreen() {
     messageTimerRef.current =
       setTimeout(() => {
         setMessage('');
+        messageTimerRef.current = null;
       }, MESSAGE_DURATION);
   };
 
   const leaveAndDiscard = async () => {
-    await discardCurrentDelivery();
-    router.replace('/home-screen');
+    try {
+      /*
+       * Deletes:
+       * - Every barcode
+       * - Last name
+       * - Notes
+       * - Photo
+       * - Signature
+       * - Active-delivery storage
+       * - Delivery files
+       */
+      await discardCurrentDelivery();
+
+      router.replace('/home-screen');
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : 'Unable to remove the delivery.';
+
+      Alert.alert(
+        'Unable to Remove Delivery',
+        errorMessage
+      );
+    }
   };
 
   const handleBack = () => {
@@ -140,6 +206,33 @@ export default function ScanScreen() {
     );
   };
 
+  const handleScanModeChange = (
+    nextMode: ScanMode
+  ) => {
+    if (nextMode === scanMode) {
+      return;
+    }
+
+    setScanMode(nextMode);
+
+    /*
+     * Reset the last scanned value so the same
+     * physical barcode can immediately be tested
+     * after changing tabs.
+     */
+    lastScanRef.current = null;
+
+    if (messageTimerRef.current) {
+      clearTimeout(
+        messageTimerRef.current
+      );
+
+      messageTimerRef.current = null;
+    }
+
+    setMessage('');
+  };
+
   const handleBarcodeScanned = (
     result: BarcodeScanningResult
   ) => {
@@ -153,9 +246,14 @@ export default function ScanScreen() {
     const now = Date.now();
     const lastScan = lastScanRef.current;
 
+    /*
+     * Prevent the camera from repeatedly processing
+     * the same barcode while it remains visible.
+     */
     if (
       lastScan &&
       lastScan.value === scannedValue &&
+      lastScan.mode === scanMode &&
       now - lastScan.time <
         REPEAT_SCAN_DELAY
     ) {
@@ -164,30 +262,60 @@ export default function ScanScreen() {
 
     lastScanRef.current = {
       value: scannedValue,
+      mode: scanMode,
       time: now,
     };
 
-    if (
-      !isValidPackageBarcode(
-        scannedValue
-      )
-    ) {
-      showMessage(
-        `"${scannedValue}" is not a valid package barcode.`
-      );
-      return;
+    if (scanMode === 'standard') {
+      if (
+        !isValidStandardBarcode(
+          scannedValue
+        )
+      ) {
+        showMessage(
+          `"${scannedValue}" is not a valid standard package barcode.`
+        );
+
+        return;
+      }
+    } else {
+      if (
+        !isValidCustomBarcode(
+          scannedValue
+        )
+      ) {
+        showMessage(
+          'Custom barcodes must use the format C1| followed by digits.'
+        );
+
+        return;
+      }
     }
 
+    /*
+     * Duplicate checking applies across both tabs.
+     *
+     * A barcode scanned in Standard cannot be added
+     * again from Custom and vice versa.
+     */
     if (
       barcodes.includes(scannedValue)
     ) {
       showMessage(
         `Package ${scannedValue} was already scanned.`
       );
+
       return;
     }
 
-    addBarcode(scannedValue);
+    const wasAdded =
+      addBarcode(scannedValue);
+
+    if (!wasAdded) {
+      showMessage(
+        `Package ${scannedValue} could not be added.`
+      );
+    }
   };
 
   const handleFinish = () => {
@@ -238,6 +366,13 @@ export default function ScanScreen() {
           handleBarcodeScanned
         }
         barcodeScannerSettings={{
+          /*
+           * C1|123456 may still be encoded as
+           * Code 128, Code 39, or Code 93.
+           *
+           * The tab controls validation, not the
+           * physical barcode symbology.
+           */
           barcodeTypes: [
             'code128',
             'code39',
@@ -250,6 +385,7 @@ export default function ScanScreen() {
         <TouchableOpacity
           onPress={handleBack}
           style={styles.topButton}
+          activeOpacity={0.7}
         >
           <Text style={styles.topButtonText}>
             ‹ Back
@@ -265,11 +401,64 @@ export default function ScanScreen() {
               : null,
           ]}
           disabled={barcodes.length === 0}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.finishButtonText}>
+            Finish
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.tabContainer}>
+        <TouchableOpacity
+          style={[
+            styles.tabButton,
+            scanMode === 'standard'
+              ? styles.activeTabButton
+              : null,
+          ]}
+          onPress={() =>
+            handleScanModeChange(
+              'standard'
+            )
+          }
+          activeOpacity={0.8}
         >
           <Text
-            style={styles.finishButtonText}
+            style={[
+              styles.tabText,
+              scanMode === 'standard'
+                ? styles.activeTabText
+                : null,
+            ]}
           >
-            Finish
+            Standard
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.tabButton,
+            scanMode === 'custom'
+              ? styles.activeTabButton
+              : null,
+          ]}
+          onPress={() =>
+            handleScanModeChange(
+              'custom'
+            )
+          }
+          activeOpacity={0.8}
+        >
+          <Text
+            style={[
+              styles.tabText,
+              scanMode === 'custom'
+                ? styles.activeTabText
+                : null,
+            ]}
+          >
+            Custom
           </Text>
         </TouchableOpacity>
       </View>
@@ -283,12 +472,31 @@ export default function ScanScreen() {
       ) : null}
 
       <View style={styles.scannerContent}>
+        <Text style={styles.modeTitle}>
+          {scanMode === 'standard'
+            ? 'Standard Barcode'
+            : 'Custom Barcode'}
+        </Text>
+
         <Text style={styles.instructions}>
-          Position a package barcode inside
-          the frame
+          {scanMode === 'standard'
+            ? 'Position a standard package barcode inside the frame.'
+            : 'Scan a barcode using the format C1| followed by digits.'}
         </Text>
 
         <View style={styles.scanFrame} />
+
+        {scanMode === 'custom' ? (
+          <View style={styles.formatBox}>
+            <Text style={styles.formatLabel}>
+              Required format
+            </Text>
+
+            <Text style={styles.formatExample}>
+              C1|123456789
+            </Text>
+          </View>
+        ) : null}
 
         <View style={styles.countBadge}>
           <Text style={styles.countText}>
@@ -316,25 +524,61 @@ export default function ScanScreen() {
             keyExtractor={(item, index) =>
               `${item}-${index}`
             }
+            showsVerticalScrollIndicator={
+              false
+            }
             renderItem={({
               item,
               index,
-            }) => (
-              <View style={styles.barcodeRow}>
-                <Text
-                  style={styles.packageNumber}
-                >
-                  Package {index + 1}
-                </Text>
+            }) => {
+              const isCustom =
+                isValidCustomBarcode(item);
 
-                <Text
-                  style={styles.barcodeText}
-                  numberOfLines={1}
+              return (
+                <View
+                  style={styles.barcodeRow}
                 >
-                  {item}
-                </Text>
-              </View>
-            )}
+                  <View
+                    style={
+                      styles.barcodeHeader
+                    }
+                  >
+                    <Text
+                      style={
+                        styles.packageNumber
+                      }
+                    >
+                      Package {index + 1}
+                    </Text>
+
+                    <View
+                      style={
+                        styles.typeBadge
+                      }
+                    >
+                      <Text
+                        style={
+                          styles.typeBadgeText
+                        }
+                      >
+                        {isCustom
+                          ? 'Custom'
+                          : 'Standard'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <Text
+                    style={
+                      styles.barcodeText
+                    }
+                    numberOfLines={1}
+                  >
+                    {item}
+                  </Text>
+                </View>
+              );
+            }}
           />
         )}
       </View>
@@ -364,14 +608,15 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    zIndex: 10,
+    zIndex: 20,
     flexDirection: 'row',
     justifyContent: 'space-between',
+    alignItems: 'center',
     paddingTop: 54,
     paddingHorizontal: 18,
     paddingBottom: 12,
     backgroundColor:
-      'rgba(0, 0, 0, 0.55)',
+      'rgba(0, 0, 0, 0.65)',
   },
   topButton: {
     paddingVertical: 8,
@@ -390,17 +635,47 @@ const styles = StyleSheet.create({
   },
   finishButtonText: {
     color: '#222222',
+    fontSize: 16,
     fontWeight: '700',
   },
   disabledButton: {
     opacity: 0.45,
   },
-  messageBox: {
+  tabContainer: {
     position: 'absolute',
     top: 112,
     left: 24,
     right: 24,
     zIndex: 20,
+    flexDirection: 'row',
+    padding: 4,
+    borderRadius: 10,
+    backgroundColor:
+      'rgba(0, 0, 0, 0.7)',
+  },
+  tabButton: {
+    flex: 1,
+    alignItems: 'center',
+    borderRadius: 7,
+    paddingVertical: 11,
+  },
+  activeTabButton: {
+    backgroundColor: '#ffffff',
+  },
+  tabText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  activeTabText: {
+    color: '#222222',
+  },
+  messageBox: {
+    position: 'absolute',
+    top: 174,
+    left: 24,
+    right: 24,
+    zIndex: 30,
     borderRadius: 8,
     padding: 14,
     backgroundColor: '#b00020',
@@ -415,13 +690,33 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 24,
+    paddingTop: 100,
     paddingBottom: 190,
+  },
+  modeTitle: {
+    color: '#ffffff',
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 8,
+    textShadowColor: '#000000',
+    textShadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    textShadowRadius: 3,
   },
   instructions: {
     color: '#ffffff',
-    fontSize: 17,
+    fontSize: 15,
     fontWeight: '600',
-    marginBottom: 24,
+    textAlign: 'center',
+    marginBottom: 22,
+    textShadowColor: '#000000',
+    textShadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    textShadowRadius: 3,
   },
   scanFrame: {
     width: '90%',
@@ -430,13 +725,32 @@ const styles = StyleSheet.create({
     borderColor: '#ffffff',
     borderRadius: 12,
   },
+  formatBox: {
+    marginTop: 16,
+    borderRadius: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    alignItems: 'center',
+    backgroundColor:
+      'rgba(0, 0, 0, 0.7)',
+  },
+  formatLabel: {
+    color: '#dddddd',
+    fontSize: 12,
+    marginBottom: 3,
+  },
+  formatExample: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
   countBadge: {
-    marginTop: 24,
+    marginTop: 18,
     paddingHorizontal: 18,
     paddingVertical: 10,
     borderRadius: 20,
     backgroundColor:
-      'rgba(0, 0, 0, 0.65)',
+      'rgba(0, 0, 0, 0.7)',
   },
   countText: {
     color: '#ffffff',
@@ -447,8 +761,10 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    maxHeight: 210,
-    padding: 20,
+    maxHeight: 220,
+    paddingTop: 18,
+    paddingHorizontal: 20,
+    paddingBottom: 24,
     backgroundColor: '#ffffff',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
@@ -460,14 +776,32 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     color: '#666666',
+    paddingBottom: 4,
   },
   barcodeRow: {
     borderTopWidth: 1,
     borderTopColor: '#eeeeee',
     paddingVertical: 10,
   },
+  barcodeHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 3,
+  },
   packageNumber: {
     fontSize: 13,
+    fontWeight: '700',
+  },
+  typeBadge: {
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: '#eeeeee',
+  },
+  typeBadgeText: {
+    color: '#444444',
+    fontSize: 11,
     fontWeight: '700',
   },
   barcodeText: {
