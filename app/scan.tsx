@@ -332,7 +332,7 @@ export default function ScanScreen() {
       scanMode === 'standard'
         ? normalizeStandardBarcode(rawValue)
         : normalizeCustomBarcode(rawValue);
-
+        
     if (!normalized) {
       showMessage(
         scanMode === 'custom'

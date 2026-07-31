@@ -7,7 +7,6 @@ import { useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  FlatList,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -348,31 +347,27 @@ export default function PackageScreen() {
               Scanned Packages
             </Text>
 
-            <FlatList
-  data={packages}
-  keyExtractor={(item, index) =>
-    `${item.trackingNumber}-${index}`
-  }
-  renderItem={({ item, index }) => (
-    <View>
-      <Text>
-        {item.trackingNumber}
-      </Text>
+            {packages.map((item, index) => (
+  <View
+    key={`${item.trackingNumber}-${index}`}
+  >
+    <Text>
+      {item.trackingNumber}
+    </Text>
 
-      <Text>
-        Carrier: {item.carrier}
-      </Text>
+    <Text>
+      Carrier: {item.carrier}
+    </Text>
 
-      <TouchableOpacity
-        onPress={() =>
-          removePackage(index)
-        }
-      >
-        <Text>Remove</Text>
-      </TouchableOpacity>
-    </View>
-  )}
-/>
+    <TouchableOpacity
+      onPress={() =>
+        removePackage(index)
+      }
+    >
+      <Text>Remove</Text>
+    </TouchableOpacity>
+  </View>
+))}
           </View>
 
           <View style={styles.section}>
