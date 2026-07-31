@@ -5,11 +5,7 @@ import {
 } from 'expo-camera';
 
 import { router } from 'expo-router';
-import {
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   Alert,
@@ -22,72 +18,180 @@ import {
 } from 'react-native';
 
 import { useDelivery } from '../context/DeliveryContext';
+import {
+  Carrier,
+  ScannedPackage,
+} from '../types/delivery';
 
 const MESSAGE_DURATION = 3000;
 const REPEAT_SCAN_DELAY = 1500;
 
-type ScanMode =
-  | 'standard'
-  | 'custom';
+type ScanMode = 'standard' | 'custom';
 
-/*
- * Standard package validation.
- *
- * This keeps your existing restrictions:
- * - Between 8 and 40 characters
- * - No URLs
- * - Only letters, numbers, and hyphens
- * - At least six digits
- */
-const isValidStandardBarcode = (
+type NormalizedBarcode = {
+  rawBarcode: string;
+  trackingNumber: string;
+  carrier: Carrier;
+};
+
+const getCarrierLabel = (carrier: Carrier): string => {
+  const labels: Record<Carrier, string> = {
+    usps: 'USPS',
+    ups: 'UPS',
+    amazon: 'Amazon',
+    gofo: 'GOFO',
+    ontrac: 'OnTrac',
+    custom: 'Custom',
+    fedex: 'FedEx',
+    unknown: 'Unknown',
+  };
+
+  return labels[carrier];
+};
+
+const isValidGenericStandardBarcode = (
   value: string
 ): boolean => {
-  const cleanedValue =
-    value.trim().toUpperCase();
-
-  if (
-    cleanedValue.length < 8 ||
-    cleanedValue.length > 40
-  ) {
+  if (value.length < 6 || value.length > 60) {
     return false;
   }
 
   if (
-    /^https?:\/\//i.test(cleanedValue) ||
-    /^www\./i.test(cleanedValue)
+    /^https?:\/\//i.test(value) ||
+    /^www\./i.test(value)
   ) {
     return false;
   }
 
-  if (!/^[A-Z0-9-]+$/.test(cleanedValue)) {
+  if (!/^[A-Z0-9-]+$/.test(value)) {
     return false;
   }
 
-  const digitCount =
-    cleanedValue.match(/\d/g)?.length ?? 0;
+  const digitCount = value.match(/\d/g)?.length ?? 0;
 
   return digitCount >= 6;
 };
 
-/*
- * Custom package validation.
- *
- * Accepted format:
- *
- * C1|123456789
- *
- * The value must:
- * - Start with C1|
- * - Contain only digits after the pipe
- * - Contain at least one digit
- */
-const isValidCustomBarcode = (
+const normalizeStandardBarcode = (
   value: string
-): boolean => {
-  const cleanedValue =
-    value.trim().toUpperCase();
+): NormalizedBarcode | null => {
+  const rawBarcode = value.trim().toUpperCase();
 
-  return /^C1\|\d+$/.test(cleanedValue);
+  if (!rawBarcode) {
+    return null;
+  }
+
+  // Amazon Logistics: TBA followed by digits.
+  if (/^TBA\d+$/.test(rawBarcode)) {
+    return {
+      rawBarcode,
+      trackingNumber: rawBarcode,
+      carrier: 'amazon',
+    };
+  }
+
+  // GOFO: GFUS followed by alphanumeric characters.
+  if (/^GFUS[A-Z0-9]+$/.test(rawBarcode)) {
+    return {
+      rawBarcode,
+      trackingNumber: rawBarcode,
+      carrier: 'gofo',
+    };
+  }
+
+  /*
+   * OnTrac: C1 immediately followed by digits.
+   * This cannot match C1|digits because the pipe is absent.
+   */
+  if (/^C1\d+$/.test(rawBarcode)) {
+    return {
+      rawBarcode,
+      trackingNumber: rawBarcode,
+      carrier: 'ontrac',
+    };
+  }
+
+  // UPS: 1Z followed by 16 alphanumeric characters.
+  if (/^1Z[A-Z0-9]{16}$/.test(rawBarcode)) {
+    return {
+      rawBarcode,
+      trackingNumber: rawBarcode,
+      carrier: 'ups',
+    };
+  }
+
+  /*
+   * USPS scanner output can contain routing/service data
+   * or non-digit characters before the final printed
+   * 22-digit tracking number.
+   */
+  const uspsSuffix = rawBarcode.match(/\d{22}$/);
+
+  if (uspsSuffix && rawBarcode.length > 22) {
+    const digitsOnly = rawBarcode.replace(/[^0-9]/g, '');
+
+    if (digitsOnly.length >= 22) {
+      return {
+        rawBarcode,
+        trackingNumber: digitsOnly.slice(-22),
+        carrier: 'usps',
+      };
+    }
+  }
+
+  /*
+   * Plain printed USPS tracking values are commonly
+   * 20–22 numeric digits.
+   */
+  if (/^\d{20,22}$/.test(rawBarcode)) {
+    return {
+      rawBarcode,
+      trackingNumber: rawBarcode,
+      carrier: 'usps',
+    };
+  }
+
+  /*
+   * A plain 12-digit value is labeled FedEx because that
+   * matches the visible tracking values you tested.
+   *
+   * Longer FedEx barcode wrappers are intentionally left
+   * unchanged and marked unknown because prefixes such as
+   * 509 and 470 are not reliable enough to safely truncate.
+   */
+  if (/^\d{12}$/.test(rawBarcode)) {
+    return {
+      rawBarcode,
+      trackingNumber: rawBarcode,
+      carrier: 'fedex',
+    };
+  }
+
+  if (!isValidGenericStandardBarcode(rawBarcode)) {
+    return null;
+  }
+
+  return {
+    rawBarcode,
+    trackingNumber: rawBarcode,
+    carrier: 'unknown',
+  };
+};
+
+const normalizeCustomBarcode = (
+  value: string
+): NormalizedBarcode | null => {
+  const rawBarcode = value.trim().toUpperCase();
+
+  if (!/^C1\|\d+$/.test(rawBarcode)) {
+    return null;
+  }
+
+  return {
+    rawBarcode,
+    trackingNumber: rawBarcode,
+    carrier: 'custom',
+  };
 };
 
 export default function ScanScreen() {
@@ -96,26 +200,22 @@ export default function ScanScreen() {
 
   const {
     delivery,
-    addBarcode,
+    addPackage,
     discardCurrentDelivery,
   } = useDelivery();
-  
 
-  const barcodes = delivery.barcodes;
+  const packages = delivery.packages;
 
   const [scanMode, setScanMode] =
     useState<ScanMode>('standard');
 
-  const [message, setMessage] =
-    useState('');
+  const [message, setMessage] = useState('');
 
   const messageTimerRef =
-    useRef<ReturnType<
-      typeof setTimeout
-    > | null>(null);
+    useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const lastScanRef = useRef<{
-    value: string;
+    rawValue: string;
     mode: ScanMode;
     time: number;
   } | null>(null);
@@ -123,62 +223,41 @@ export default function ScanScreen() {
   useEffect(() => {
     return () => {
       if (messageTimerRef.current) {
-        clearTimeout(
-          messageTimerRef.current
-        );
+        clearTimeout(messageTimerRef.current);
       }
     };
   }, []);
 
-  const showMessage = (
-    value: string
-  ) => {
+  const showMessage = (value: string) => {
     if (messageTimerRef.current) {
-      clearTimeout(
-        messageTimerRef.current
-      );
+      clearTimeout(messageTimerRef.current);
     }
 
     setMessage(value);
 
-    messageTimerRef.current =
-      setTimeout(() => {
-        setMessage('');
-        messageTimerRef.current = null;
-      }, MESSAGE_DURATION);
+    messageTimerRef.current = setTimeout(() => {
+      setMessage('');
+      messageTimerRef.current = null;
+    }, MESSAGE_DURATION);
   };
 
   const leaveAndDiscard = async () => {
     try {
-      /*
-       * Deletes:
-       * - Every barcode
-       * - Last name
-       * - Notes
-       * - Photo
-       * - Signature
-       * - Active-delivery storage
-       * - Delivery files
-       */
       await discardCurrentDelivery();
-
       router.replace('/home-screen');
     } catch (error) {
-      const errorMessage =
-        error instanceof Error
-          ? error.message
-          : 'Unable to remove the delivery.';
-
       Alert.alert(
         'Unable to Remove Delivery',
-        errorMessage
+        error instanceof Error
+          ? error.message
+          : 'Unable to remove the delivery.'
       );
     }
   };
 
   const handleBack = () => {
     const hasAnyInformation =
-      barcodes.length > 0 ||
+      packages.length > 0 ||
       delivery.lastName.trim().length > 0 ||
       delivery.notes.trim().length > 0 ||
       Boolean(delivery.photoUri) ||
@@ -191,7 +270,7 @@ export default function ScanScreen() {
 
     Alert.alert(
       'Remove All Packages',
-      'Are you sure you want to remove all packages?',
+      'Are you sure you want to remove all packages and delivery information?',
       [
         {
           text: 'No',
@@ -206,153 +285,93 @@ export default function ScanScreen() {
     );
   };
 
-  const handleScanModeChange = (
-    nextMode: ScanMode
-  ) => {
+  const handleScanModeChange = (nextMode: ScanMode) => {
     if (nextMode === scanMode) {
       return;
     }
 
     setScanMode(nextMode);
-
-    /*
-     * Reset the last scanned value so the same
-     * physical barcode can immediately be tested
-     * after changing tabs.
-     */
     lastScanRef.current = null;
 
     if (messageTimerRef.current) {
-      clearTimeout(
-        messageTimerRef.current
-      );
-
+      clearTimeout(messageTimerRef.current);
       messageTimerRef.current = null;
     }
 
     setMessage('');
   };
 
-  const normalizeStandardBarcode = (
-  value: string
-): string => {
-  const cleanedValue =
-    value.trim().toUpperCase();
-
-  /*
-   * USPS labels may return extra numeric prefix data.
-   * When the scanned value is all digits and longer
-   * than 22 characters, keep the final 22 digits.
-   */
-  if (
-    /^\d+$/.test(cleanedValue) &&
-    cleanedValue.length > 22
-  ) {
-    return cleanedValue.slice(-22);
-  }
-
-  return cleanedValue;
-};
-
   const handleBarcodeScanned = (
     result: BarcodeScanningResult
   ) => {
-    const rawScannedValue =
-  result.data.trim().toUpperCase();
+    const rawValue = result.data.trim().toUpperCase();
 
-const scannedValue =
-  scanMode === 'standard'
-    ? normalizeStandardBarcode(
-        rawScannedValue
-      )
-    : rawScannedValue;
-
-    if (!scannedValue) {
+    if (!rawValue) {
       return;
     }
 
     const now = Date.now();
     const lastScan = lastScanRef.current;
 
-    /*
-     * Prevent the camera from repeatedly processing
-     * the same barcode while it remains visible.
-     */
     if (
       lastScan &&
-      lastScan.value === scannedValue &&
+      lastScan.rawValue === rawValue &&
       lastScan.mode === scanMode &&
-      now - lastScan.time <
-        REPEAT_SCAN_DELAY
+      now - lastScan.time < REPEAT_SCAN_DELAY
     ) {
       return;
     }
 
     lastScanRef.current = {
-      value: scannedValue,
+      rawValue,
       mode: scanMode,
       time: now,
     };
 
-    if (scanMode === 'standard') {
-      if (
-        !isValidStandardBarcode(
-          scannedValue
-        )
-      ) {
-        showMessage(
-          `"${scannedValue}" is not a valid standard package barcode.`
-        );
+    const normalized =
+      scanMode === 'standard'
+        ? normalizeStandardBarcode(rawValue)
+        : normalizeCustomBarcode(rawValue);
 
-        return;
-      }
-    } else {
-      if (
-        !isValidCustomBarcode(
-          scannedValue
-        )
-      ) {
-        showMessage(
-          'Custom barcodes must use the format C1| followed by digits.'
-        );
-
-        return;
-      }
-    }
-
-    /*
-     * Duplicate checking applies across both tabs.
-     *
-     * A barcode scanned in Standard cannot be added
-     * again from Custom and vice versa.
-     */
-    if (
-      barcodes.includes(scannedValue)
-    ) {
+    if (!normalized) {
       showMessage(
-        `Package ${scannedValue} was already scanned.`
+        scanMode === 'custom'
+          ? 'Custom barcodes must use C1| followed by digits.'
+          : `"${rawValue}" is not a recognized package barcode.`
       );
-
       return;
     }
 
-    const wasAdded =
-      addBarcode(scannedValue);
+    const duplicate = packages.some(
+      (item) =>
+        item.trackingNumber === normalized.trackingNumber
+    );
 
-    if (!wasAdded) {
+    if (duplicate) {
       showMessage(
-        `Package ${scannedValue} could not be added.`
+        `Package ${normalized.trackingNumber} was already scanned.`
+      );
+      return;
+    }
+
+    const scannedPackage: ScannedPackage = {
+      ...normalized,
+      scannedAt: new Date().toISOString(),
+    };
+
+    if (!addPackage(scannedPackage)) {
+      showMessage(
+        `Package ${normalized.trackingNumber} could not be added.`
       );
     }
   };
 
   const handleFinish = () => {
-    if (barcodes.length === 0) {
+    if (packages.length === 0) {
       Alert.alert(
         'No Packages Scanned',
         'Scan at least one package before continuing.'
       );
-
       return;
     }
 
@@ -362,9 +381,7 @@ const scannedValue =
   if (!permission) {
     return (
       <View style={styles.centered}>
-        <Text>
-          Checking camera permission...
-        </Text>
+        <Text>Checking camera permission...</Text>
       </View>
     );
   }
@@ -373,8 +390,7 @@ const scannedValue =
     return (
       <View style={styles.centered}>
         <Text style={styles.permissionText}>
-          Camera access is required to scan
-          package barcodes.
+          Camera access is required to scan package barcodes.
         </Text>
 
         <Button
@@ -390,21 +406,18 @@ const scannedValue =
       <CameraView
         style={StyleSheet.absoluteFillObject}
         facing="back"
-        onBarcodeScanned={
-          handleBarcodeScanned
-        }
+        onBarcodeScanned={handleBarcodeScanned}
         barcodeScannerSettings={{
-          /*
-           * C1|123456 may still be encoded as
-           * Code 128, Code 39, or Code 93.
-           *
-           * The tab controls validation, not the
-           * physical barcode symbology.
-           */
           barcodeTypes: [
             'code128',
             'code39',
             'code93',
+            'ean13',
+            'ean8',
+            'upc_a',
+            'upc_e',
+            'itf14',
+            'codabar',
           ],
         }}
       />
@@ -415,25 +428,21 @@ const scannedValue =
           style={styles.topButton}
           activeOpacity={0.7}
         >
-          <Text style={styles.topButtonText}>
-            ‹ Back
-          </Text>
+          <Text style={styles.topButtonText}>‹ Back</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           onPress={handleFinish}
           style={[
             styles.finishButton,
-            barcodes.length === 0
+            packages.length === 0
               ? styles.disabledButton
               : null,
           ]}
-          disabled={barcodes.length === 0}
+          disabled={packages.length === 0}
           activeOpacity={0.7}
         >
-          <Text style={styles.finishButtonText}>
-            Finish
-          </Text>
+          <Text style={styles.finishButtonText}>Finish</Text>
         </TouchableOpacity>
       </View>
 
@@ -445,12 +454,7 @@ const scannedValue =
               ? styles.activeTabButton
               : null,
           ]}
-          onPress={() =>
-            handleScanModeChange(
-              'standard'
-            )
-          }
-          activeOpacity={0.8}
+          onPress={() => handleScanModeChange('standard')}
         >
           <Text
             style={[
@@ -471,12 +475,7 @@ const scannedValue =
               ? styles.activeTabButton
               : null,
           ]}
-          onPress={() =>
-            handleScanModeChange(
-              'custom'
-            )
-          }
-          activeOpacity={0.8}
+          onPress={() => handleScanModeChange('custom')}
         >
           <Text
             style={[
@@ -493,23 +492,21 @@ const scannedValue =
 
       {message ? (
         <View style={styles.messageBox}>
-          <Text style={styles.messageText}>
-            {message}
-          </Text>
+          <Text style={styles.messageText}>{message}</Text>
         </View>
       ) : null}
 
       <View style={styles.scannerContent}>
         <Text style={styles.modeTitle}>
           {scanMode === 'standard'
-            ? 'Standard Barcode'
+            ? 'Carrier Barcode'
             : 'Custom Barcode'}
         </Text>
 
         <Text style={styles.instructions}>
           {scanMode === 'standard'
-            ? 'Position a standard package barcode inside the frame.'
-            : 'Scan a barcode using the format C1| followed by digits.'}
+            ? 'Scan USPS, UPS, Amazon, GOFO, OnTrac, FedEx, or another package barcode.'
+            : 'Scan a barcode using C1| followed by digits.'}
         </Text>
 
         <View style={styles.scanFrame} />
@@ -528,8 +525,8 @@ const scannedValue =
 
         <View style={styles.countBadge}>
           <Text style={styles.countText}>
-            {barcodes.length}{' '}
-            {barcodes.length === 1
+            {packages.length}{' '}
+            {packages.length === 1
               ? 'package'
               : 'packages'}{' '}
             scanned
@@ -542,71 +539,48 @@ const scannedValue =
           Scanned Packages
         </Text>
 
-        {barcodes.length === 0 ? (
+        {packages.length === 0 ? (
           <Text style={styles.emptyText}>
             No packages scanned yet.
           </Text>
         ) : (
           <FlatList
-            data={barcodes}
+            data={packages}
             keyExtractor={(item, index) =>
-              `${item}-${index}`
+              `${item.trackingNumber}-${index}`
             }
-            showsVerticalScrollIndicator={
-              false
-            }
-            renderItem={({
-              item,
-              index,
-            }) => {
-              const isCustom =
-                isValidCustomBarcode(item);
+            showsVerticalScrollIndicator={false}
+            renderItem={({ item, index }) => (
+              <View style={styles.barcodeRow}>
+                <View style={styles.barcodeHeader}>
+                  <Text style={styles.packageNumber}>
+                    Package {index + 1}
+                  </Text>
 
-              return (
-                <View
-                  style={styles.barcodeRow}
-                >
-                  <View
-                    style={
-                      styles.barcodeHeader
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.packageNumber
-                      }
-                    >
-                      Package {index + 1}
+                  <View style={styles.typeBadge}>
+                    <Text style={styles.typeBadgeText}>
+                      {getCarrierLabel(item.carrier)}
                     </Text>
-
-                    <View
-                      style={
-                        styles.typeBadge
-                      }
-                    >
-                      <Text
-                        style={
-                          styles.typeBadgeText
-                        }
-                      >
-                        {isCustom
-                          ? 'Custom'
-                          : 'Standard'}
-                      </Text>
-                    </View>
                   </View>
+                </View>
 
+                <Text
+                  style={styles.barcodeText}
+                  numberOfLines={1}
+                >
+                  {item.trackingNumber}
+                </Text>
+
+                {item.rawBarcode !== item.trackingNumber ? (
                   <Text
-                    style={
-                      styles.barcodeText
-                    }
+                    style={styles.rawBarcodeText}
                     numberOfLines={1}
                   >
-                    {item}
+                    Raw: {item.rawBarcode}
                   </Text>
-                </View>
-              );
-            }}
+                ) : null}
+              </View>
+            )}
           />
         )}
       </View>
@@ -643,8 +617,7 @@ const styles = StyleSheet.create({
     paddingTop: 54,
     paddingHorizontal: 18,
     paddingBottom: 12,
-    backgroundColor:
-      'rgba(0, 0, 0, 0.65)',
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
   },
   topButton: {
     paddingVertical: 8,
@@ -678,8 +651,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     padding: 4,
     borderRadius: 10,
-    backgroundColor:
-      'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
   },
   tabButton: {
     flex: 1,
@@ -726,12 +698,6 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     marginBottom: 8,
-    textShadowColor: '#000000',
-    textShadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    textShadowRadius: 3,
   },
   instructions: {
     color: '#ffffff',
@@ -739,12 +705,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
     marginBottom: 22,
-    textShadowColor: '#000000',
-    textShadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    textShadowRadius: 3,
   },
   scanFrame: {
     width: '90%',
@@ -759,8 +719,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 10,
     alignItems: 'center',
-    backgroundColor:
-      'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
   },
   formatLabel: {
     color: '#dddddd',
@@ -777,8 +736,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 10,
     borderRadius: 20,
-    backgroundColor:
-      'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
   },
   countText: {
     color: '#ffffff',
@@ -789,7 +747,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    maxHeight: 220,
+    maxHeight: 230,
     paddingTop: 18,
     paddingHorizontal: 20,
     paddingBottom: 24,
@@ -804,7 +762,6 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     color: '#666666',
-    paddingBottom: 4,
   },
   barcodeRow: {
     borderTopWidth: 1,
@@ -833,7 +790,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   barcodeText: {
-    color: '#555555',
+    color: '#333333',
     fontSize: 14,
+    fontWeight: '600',
+  },
+  rawBarcodeText: {
+    color: '#777777',
+    fontSize: 11,
+    marginTop: 3,
   },
 });

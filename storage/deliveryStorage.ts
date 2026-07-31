@@ -1,24 +1,15 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
 import * as FileSystem from 'expo-file-system/legacy';
 
-import {
-  getCurrentAccountKey,
-} from './accountStorage';
+import { getCurrentAccountKey } from './accountStorage';
 
 import {
+  normalizeStoredDelivery,
   QueuedDelivery,
   StoredDelivery,
 } from '../types/delivery';
 
-const STORAGE_PREFIX =
-  '@packageTracker';
-
-const LEGACY_ACTIVE_DELIVERY_KEY =
-  '@packageTracker/activeDelivery';
-
-const LEGACY_DELIVERY_QUEUE_KEY =
-  '@packageTracker/deliveryQueue';
+const STORAGE_PREFIX = '@packageTracker';
 
 const DELIVERY_DIRECTORY =
   `${FileSystem.documentDirectory}deliveries/`;
@@ -37,7 +28,7 @@ const getRequiredAccountKey =
     return accountKey;
   };
 
-const getSafeAccountDirectoryName = (
+const getSafeAccountName = (
   accountKey: string
 ): string => {
   return encodeURIComponent(accountKey);
@@ -48,37 +39,37 @@ const getActiveDeliveryKey = (
 ): string => {
   return (
     `${STORAGE_PREFIX}/` +
-    `${getSafeAccountDirectoryName(accountKey)}/` +
+    `${getSafeAccountName(accountKey)}/` +
     'activeDelivery'
   );
 };
 
-const getDeliveryQueueKey = (
+const getQueueKey = (
   accountKey: string
 ): string => {
   return (
     `${STORAGE_PREFIX}/` +
-    `${getSafeAccountDirectoryName(accountKey)}/` +
+    `${getSafeAccountName(accountKey)}/` +
     'deliveryQueue'
   );
 };
 
-const getAccountDeliveryDirectory = (
+const getAccountDirectory = (
   accountKey: string
 ): string => {
   return (
     `${DELIVERY_DIRECTORY}` +
-    `${getSafeAccountDirectoryName(accountKey)}/`
+    `${getSafeAccountName(accountKey)}/`
   );
 };
 
 const ensureDirectory = async (
   directory: string
 ): Promise<void> => {
-  const information =
+  const info =
     await FileSystem.getInfoAsync(directory);
 
-  if (!information.exists) {
+  if (!info.exists) {
     await FileSystem.makeDirectoryAsync(
       directory,
       {
@@ -92,35 +83,30 @@ const ensureDeliveryDirectory = async (
   accountKey: string,
   deliveryId: string
 ): Promise<string> => {
-  await ensureDirectory(
-    DELIVERY_DIRECTORY
-  );
+  await ensureDirectory(DELIVERY_DIRECTORY);
 
   const accountDirectory =
-    getAccountDeliveryDirectory(accountKey);
+    getAccountDirectory(accountKey);
 
-  await ensureDirectory(
-    accountDirectory
-  );
+  await ensureDirectory(accountDirectory);
 
   const deliveryDirectory =
     `${accountDirectory}${deliveryId}/`;
 
-  await ensureDirectory(
-    deliveryDirectory
-  );
+  await ensureDirectory(deliveryDirectory);
 
   return deliveryDirectory;
 };
 
-const getFileExtension = (
+const getExtension = (
   uri: string,
   fallback: string
 ): string => {
-  const cleanUri = uri.split('?')[0];
+  const cleanUri =
+    uri.split('?')[0];
 
   const match =
-    cleanUri.match(/\.([a-zA-Z0-9]+)$/);
+    cleanUri.match(/\.([A-Za-z0-9]+)$/);
 
   return (
     match?.[1]?.toLowerCase() ??
@@ -128,71 +114,63 @@ const getFileExtension = (
   );
 };
 
-export const persistDeliveryFile = async (
-  sourceUri: string,
-  deliveryId: string,
-  fileName: 'photo' | 'signature'
-): Promise<string> => {
-  const accountKey =
-    await getRequiredAccountKey();
+export const persistDeliveryFile =
+  async (
+    sourceUri: string,
+    deliveryId: string,
+    fileName: 'photo' | 'signature'
+  ): Promise<string> => {
+    const accountKey =
+      await getRequiredAccountKey();
 
-  const directory =
-    await ensureDeliveryDirectory(
-      accountKey,
-      deliveryId
-    );
+    const directory =
+      await ensureDeliveryDirectory(
+        accountKey,
+        deliveryId
+      );
 
-  const fallbackExtension =
-    fileName === 'photo'
-      ? 'jpg'
-      : 'png';
+    const extension =
+      getExtension(
+        sourceUri,
+        fileName === 'photo'
+          ? 'jpg'
+          : 'png'
+      );
 
-  const extension =
-    getFileExtension(
-      sourceUri,
-      fallbackExtension
-    );
+    const destination =
+      `${directory}${fileName}.${extension}`;
 
-  const destinationUri =
-    `${directory}${fileName}.${extension}`;
+    if (sourceUri === destination) {
+      return destination;
+    }
 
-  if (sourceUri === destinationUri) {
-    return destinationUri;
-  }
-
-  const existingDestination =
-    await FileSystem.getInfoAsync(
-      destinationUri
-    );
-
-  if (existingDestination.exists) {
     await FileSystem.deleteAsync(
-      destinationUri,
+      destination,
       {
         idempotent: true,
       }
     );
-  }
 
-  await FileSystem.copyAsync({
-    from: sourceUri,
-    to: destinationUri,
-  });
+    await FileSystem.copyAsync({
+      from: sourceUri,
+      to: destination,
+    });
 
-  return destinationUri;
-};
+    return destination;
+  };
 
-export const saveActiveDelivery = async (
-  delivery: StoredDelivery
-): Promise<void> => {
-  const accountKey =
-    await getRequiredAccountKey();
+export const saveActiveDelivery =
+  async (
+    delivery: StoredDelivery
+  ): Promise<void> => {
+    const accountKey =
+      await getRequiredAccountKey();
 
-  await AsyncStorage.setItem(
-    getActiveDeliveryKey(accountKey),
-    JSON.stringify(delivery)
-  );
-};
+    await AsyncStorage.setItem(
+      getActiveDeliveryKey(accountKey),
+      JSON.stringify(delivery)
+    );
+  };
 
 export const getActiveDelivery =
   async (): Promise<StoredDelivery | null> => {
@@ -214,12 +192,18 @@ export const getActiveDelivery =
     }
 
     try {
-      return JSON.parse(
-        value
-      ) as StoredDelivery;
+      const normalized =
+        normalizeStoredDelivery(
+          JSON.parse(value)
+        );
+
+      if (!normalized) {
+        await AsyncStorage.removeItem(key);
+      }
+
+      return normalized;
     } catch {
       await AsyncStorage.removeItem(key);
-
       return null;
     }
   };
@@ -248,7 +232,7 @@ export const getQueuedDeliveries =
     }
 
     const key =
-      getDeliveryQueueKey(accountKey);
+      getQueueKey(accountKey);
 
     const value =
       await AsyncStorage.getItem(key);
@@ -258,71 +242,125 @@ export const getQueuedDeliveries =
     }
 
     try {
-      const parsed = JSON.parse(value);
+      const parsed =
+        JSON.parse(value);
 
-      return Array.isArray(parsed)
-        ? parsed as QueuedDelivery[]
-        : [];
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+
+      const deliveries: QueuedDelivery[] = [];
+
+for (const item of parsed) {
+  const normalized =
+    normalizeStoredDelivery(item);
+
+  if (!normalized) {
+    continue;
+  }
+
+  const queueItem =
+    item as Partial<QueuedDelivery>;
+
+  const queuedDelivery:
+    QueuedDelivery = {
+      ...normalized,
+
+      queuedAt:
+        typeof queueItem.queuedAt ===
+        'string'
+          ? queueItem.queuedAt
+          : new Date().toISOString(),
+
+      uploadAttempts:
+        typeof queueItem.uploadAttempts ===
+        'number'
+          ? queueItem.uploadAttempts
+          : 0,
+  };
+
+  if (
+    typeof queueItem.lastError ===
+    'string'
+  ) {
+    queuedDelivery.lastError =
+      queueItem.lastError;
+  }
+
+  deliveries.push(
+    queuedDelivery
+  );
+}
+
+return deliveries;
     } catch {
       await AsyncStorage.removeItem(key);
-
       return [];
     }
   };
 
-export const saveQueuedDeliveries = async (
-  deliveries: QueuedDelivery[]
-): Promise<void> => {
-  const accountKey =
-    await getRequiredAccountKey();
+export const saveQueuedDeliveries =
+  async (
+    deliveries: QueuedDelivery[]
+  ): Promise<void> => {
+    const accountKey =
+      await getRequiredAccountKey();
 
-  await AsyncStorage.setItem(
-    getDeliveryQueueKey(accountKey),
-    JSON.stringify(deliveries)
-  );
-};
+    await AsyncStorage.setItem(
+      getQueueKey(accountKey),
+      JSON.stringify(deliveries)
+    );
+  };
 
-export const addDeliveryToQueue = async (
-  delivery: StoredDelivery,
-  error?: string
-): Promise<QueuedDelivery> => {
-  const queue =
-    await getQueuedDeliveries();
+export const addDeliveryToQueue =
+  async (
+    delivery: StoredDelivery,
+    error?: string
+  ): Promise<QueuedDelivery> => {
+    const queue =
+      await getQueuedDeliveries();
 
-  const existingIndex =
-    queue.findIndex(
-      (item) =>
-        item.id === delivery.id
+    const index =
+      queue.findIndex(
+        (item) =>
+          item.id === delivery.id
+      );
+
+    const existing =
+      index >= 0
+        ? queue[index]
+        : null;
+
+    const queuedDelivery: QueuedDelivery =
+      {
+        ...delivery,
+
+        queuedAt:
+          existing?.queuedAt ??
+          new Date().toISOString(),
+
+        uploadAttempts:
+          existing?.uploadAttempts ??
+          0,
+
+        lastError: error,
+      };
+
+    if (index >= 0) {
+      queue[index] =
+        queuedDelivery;
+    } else {
+      queue.push(
+        queuedDelivery
+      );
+    }
+
+    await saveQueuedDeliveries(
+      queue
     );
 
-  const existingDelivery =
-    existingIndex >= 0
-      ? queue[existingIndex]
-      : null;
-
-  const queuedDelivery:
-    QueuedDelivery = {
-      ...delivery,
-      queuedAt:
-        existingDelivery?.queuedAt ??
-        new Date().toISOString(),
-      uploadAttempts:
-        existingDelivery
-          ?.uploadAttempts ?? 0,
-      lastError: error,
-    };
-
-  if (existingIndex >= 0) {
-    queue[existingIndex] =
-      queuedDelivery;
-  } else {
-    queue.push(queuedDelivery);
-  }
-
-  await saveQueuedDeliveries(queue);
-
-  return queuedDelivery;
-};
+    return queuedDelivery;
+  };
 
 export const updateQueuedDelivery =
   async (
@@ -331,15 +369,12 @@ export const updateQueuedDelivery =
     const queue =
       await getQueuedDeliveries();
 
-    const updatedQueue =
+    await saveQueuedDeliveries(
       queue.map((item) =>
         item.id === delivery.id
           ? delivery
           : item
-      );
-
-    await saveQueuedDeliveries(
-      updatedQueue
+      )
     );
   };
 
@@ -350,14 +385,11 @@ export const removeQueuedDelivery =
     const queue =
       await getQueuedDeliveries();
 
-    const updatedQueue =
-      queue.filter(
-        (delivery) =>
-          delivery.id !== deliveryId
-      );
-
     await saveQueuedDeliveries(
-      updatedQueue
+      queue.filter(
+        (item) =>
+          item.id !== deliveryId
+      )
     );
   };
 
@@ -372,30 +404,12 @@ export const deleteDeliveryFiles =
       return;
     }
 
-    const directory =
-      `${getAccountDeliveryDirectory(
-        accountKey
-      )}${deliveryId}/`;
-
     await FileSystem.deleteAsync(
-      directory,
+      `${getAccountDirectory(
+        accountKey
+      )}${deliveryId}/`,
       {
         idempotent: true,
       }
     );
-  };
-
-/*
- * This removes data created by the old,
- * non-account-scoped storage version.
- *
- * Call this once only if you intentionally
- * want to delete the old shared queue.
- */
-export const clearLegacySharedStorage =
-  async (): Promise<void> => {
-    await AsyncStorage.multiRemove([
-      LEGACY_ACTIVE_DELIVERY_KEY,
-      LEGACY_DELIVERY_QUEUE_KEY,
-    ]);
   };

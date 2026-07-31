@@ -5,19 +5,19 @@ import { router } from 'expo-router';
 import { useState } from 'react';
 
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    Image,
-    KeyboardAvoidingView,
-    Platform,
-    SafeAreaView,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Image,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 import { createPackage } from '../api/packages';
@@ -45,7 +45,7 @@ export default function PackageScreen() {
   const {
     delivery,
     mode,
-    removeBarcode,
+    removePackage,
     setLastName,
     setNotes,
     setLocation,
@@ -57,12 +57,12 @@ export default function PackageScreen() {
     useState(false);
 
   const {
-    barcodes,
-    lastName,
-    notes,
-    photoUri,
-    signatureUri,
-  } = delivery;
+  packages,
+  lastName,
+  notes,
+  photoUri,
+  signatureUri,
+} = delivery;
 
   const handleBack = () => {
     if (submitting) {
@@ -115,7 +115,7 @@ export default function PackageScreen() {
           text: 'Remove',
           style: 'destructive',
           onPress: () =>
-            removeBarcode(index),
+            removePackage(index),
         },
       ]
     );
@@ -155,7 +155,7 @@ export default function PackageScreen() {
       return;
     }
 
-    if (barcodes.length === 0) {
+    if (packages.length === 0) {
       Alert.alert(
         'No Packages',
         'At least one package is required.'
@@ -216,25 +216,24 @@ export default function PackageScreen() {
       const { date, time } =
         getDateAndTime();
 
-      for (const barcode of barcodes) {
-        await createPackage({
-          barcode,
-          date,
-          time,
-          comment: notes.trim(),
-          lastName: lastName.trim(),
-          latitude:
-            location.latitude,
-          longitude:
-            location.longitude,
-          photoUri,
-          signatureUri,
-          token,
-        });
-      }
+      for (const item of packages) {
+  await createPackage({
+    barcode: item.trackingNumber,
+    carrier: item.carrier,
+    date,
+    time,
+    comment: notes.trim(),
+    lastName: lastName.trim(),
+    latitude: location.latitude,
+    longitude: location.longitude,
+    photoUri,
+    signatureUri,
+    token,
+  });
+}
 
       const uploadedCount =
-        barcodes.length;
+        packages.length;
 
       await clearCurrentDeliveryAfterUpload();
 
@@ -335,8 +334,8 @@ export default function PackageScreen() {
           </Text>
 
           <Text style={styles.summary}>
-            {barcodes.length}{' '}
-            {barcodes.length === 1
+            {packages.length}{' '}
+            {packages.length === 1
               ? 'package'
               : 'packages'}{' '}
             scanned
@@ -350,54 +349,30 @@ export default function PackageScreen() {
             </Text>
 
             <FlatList
-              data={barcodes}
-              scrollEnabled={false}
-              keyExtractor={(
-                item,
-                index
-              ) => `${item}-${index}`}
-              renderItem={({
-                item,
-                index,
-              }) => (
-                <View
-                  style={styles.barcodeBox}
-                >
-                  <View
-                    style={
-                      styles.packageHeader
-                    }
-                  >
-                    <Text
-                      style={
-                        styles.packageNumber
-                      }
-                    >
-                      Package {index + 1}
-                    </Text>
+  data={packages}
+  keyExtractor={(item, index) =>
+    `${item.trackingNumber}-${index}`
+  }
+  renderItem={({ item, index }) => (
+    <View>
+      <Text>
+        {item.trackingNumber}
+      </Text>
 
-                    <TouchableOpacity
-                      onPress={() =>
-                        handleRemove(index)
-                      }
-                      disabled={submitting}
-                    >
-                      <Text
-                        style={
-                          styles.removeText
-                        }
-                      >
-                        Remove
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
+      <Text>
+        Carrier: {item.carrier}
+      </Text>
 
-                  <Text style={styles.barcode}>
-                    {item}
-                  </Text>
-                </View>
-              )}
-            />
+      <TouchableOpacity
+        onPress={() =>
+          removePackage(index)
+        }
+      >
+        <Text>Remove</Text>
+      </TouchableOpacity>
+    </View>
+  )}
+/>
           </View>
 
           <View style={styles.section}>

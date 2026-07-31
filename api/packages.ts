@@ -1,5 +1,8 @@
+import { Carrier } from '../types/delivery';
+
 type CreatePackageInput = {
   barcode: string;
+  carrier: Carrier;
   date: string;
   time: string;
   comment: string;
@@ -15,7 +18,7 @@ type CreatePackageResponse = {
   success: boolean;
   message?: string;
   error?: string;
-  data?: unknown;
+  details?: string;
 };
 
 export async function createPackage(
@@ -24,35 +27,30 @@ export async function createPackage(
   const formData = new FormData();
 
   formData.append('barcode', input.barcode);
+  formData.append('carrier', input.carrier);
   formData.append('date', input.date);
   formData.append('time', input.time);
   formData.append('comment', input.comment);
   formData.append('lastName', input.lastName);
 
   if (input.latitude !== null) {
-    formData.append(
-      'latitude',
-      String(input.latitude)
-    );
+    formData.append('latitude', String(input.latitude));
   }
 
   if (input.longitude !== null) {
-    formData.append(
-      'longitude',
-      String(input.longitude)
-    );
+    formData.append('longitude', String(input.longitude));
   }
 
-if (input.photoUri) {
-  formData.append(
-    'photo',
-    {
-      uri: input.photoUri,
-      name: 'package-photo.jpg',
-      type: 'image/jpeg',
-    } as any
-  );
-}
+  if (input.photoUri) {
+    formData.append(
+      'photo',
+      {
+        uri: input.photoUri,
+        name: 'package-photo.jpg',
+        type: 'image/jpeg',
+      } as any
+    );
+  }
 
   formData.append(
     'signature',
@@ -75,19 +73,23 @@ if (input.photoUri) {
     }
   );
 
+  const responseText = await response.text();
+
   let data: CreatePackageResponse;
 
   try {
-    data = await response.json();
+    data = JSON.parse(responseText) as CreatePackageResponse;
   } catch {
     throw new Error(
-      'The server returned an invalid response.'
+      `The server returned a non-JSON response (HTTP ${response.status}).`
     );
   }
 
   if (!response.ok || !data.success) {
     throw new Error(
-      data.error ?? 'Unable to upload package.'
+      data.details ??
+        data.error ??
+        'Unable to upload package.'
     );
   }
 

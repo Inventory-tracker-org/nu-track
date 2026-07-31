@@ -2,19 +2,19 @@ import * as SecureStore from 'expo-secure-store';
 
 import { router } from 'expo-router';
 import {
-    useCallback,
-    useState,
+  useCallback,
+  useState,
 } from 'react';
 
 import {
-    ActivityIndicator,
-    Alert,
-    FlatList,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 import { useFocusEffect } from '@react-navigation/native';
@@ -22,14 +22,14 @@ import { useFocusEffect } from '@react-navigation/native';
 import { createPackage } from '../api/packages';
 
 import {
-    deleteDeliveryFiles,
-    getQueuedDeliveries,
-    removeQueuedDelivery,
-    updateQueuedDelivery,
+  deleteDeliveryFiles,
+  getQueuedDeliveries,
+  removeQueuedDelivery,
+  updateQueuedDelivery,
 } from '../storage/deliveryStorage';
 
 import {
-    QueuedDelivery,
+  QueuedDelivery,
 } from '../types/delivery';
 
 const getDateAndTime = (
@@ -100,29 +100,21 @@ export default function SyncScreen() {
         delivery.createdAt
       );
 
-    for (
-      const barcode of
-      delivery.barcodes
-    ) {
-      await createPackage({
-        barcode,
-        date,
-        time,
-        comment:
-          delivery.notes.trim(),
-        lastName:
-          delivery.lastName.trim(),
-        latitude:
-          delivery.latitude,
-        longitude:
-          delivery.longitude,
-        photoUri:
-          delivery.photoUri,
-        signatureUri:
-          delivery.signatureUri,
-        token,
-      });
-    }
+    for (const item of delivery.packages) {
+  await createPackage({
+    barcode: item.trackingNumber,
+    carrier: item.carrier,
+    date,
+    time,
+    comment: delivery.notes.trim(),
+    lastName: delivery.lastName.trim(),
+    latitude: delivery.latitude,
+    longitude: delivery.longitude,
+    photoUri: delivery.photoUri,
+    signatureUri: delivery.signatureUri,
+    token,
+  });
+}
   };
 
   const handleSyncAll = async () => {
@@ -291,8 +283,8 @@ export default function SyncScreen() {
                     styles.deliveryTitle
                   }
                 >
-                  {item.barcodes.length}{' '}
-                  {item.barcodes.length ===
+                  {item.packages.length}{' '}
+                  {item.packages.length ===
                   1
                     ? 'package'
                     : 'packages'}
