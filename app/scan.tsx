@@ -21,8 +21,7 @@ import {
   View,
 } from 'react-native';
 
-import { useDelivery } from
-  '../context/DeliveryContext';
+import { useDelivery } from '../context/DeliveryContext';
 
 const MESSAGE_DURATION = 3000;
 const REPEAT_SCAN_DELAY = 1500;
@@ -100,6 +99,7 @@ export default function ScanScreen() {
     addBarcode,
     discardCurrentDelivery,
   } = useDelivery();
+  
 
   const barcodes = delivery.barcodes;
 
@@ -233,11 +233,39 @@ export default function ScanScreen() {
     setMessage('');
   };
 
+  const normalizeStandardBarcode = (
+  value: string
+): string => {
+  const cleanedValue =
+    value.trim().toUpperCase();
+
+  /*
+   * USPS labels may return extra numeric prefix data.
+   * When the scanned value is all digits and longer
+   * than 22 characters, keep the final 22 digits.
+   */
+  if (
+    /^\d+$/.test(cleanedValue) &&
+    cleanedValue.length > 22
+  ) {
+    return cleanedValue.slice(-22);
+  }
+
+  return cleanedValue;
+};
+
   const handleBarcodeScanned = (
     result: BarcodeScanningResult
   ) => {
-    const scannedValue =
-      result.data.trim().toUpperCase();
+    const rawScannedValue =
+  result.data.trim().toUpperCase();
+
+const scannedValue =
+  scanMode === 'standard'
+    ? normalizeStandardBarcode(
+        rawScannedValue
+      )
+    : rawScannedValue;
 
     if (!scannedValue) {
       return;
