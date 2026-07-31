@@ -88,10 +88,23 @@ export default function LoginScreen() {
     setLoading(true);
 
     try {
-      const token = await loginUser(
-        email.trim(),
-        password
-      );
+      const {
+  token,
+  user,
+} = await loginUser(
+  email.trim(),
+  password
+);
+
+await SecureStore.setItemAsync(
+  'token',
+  token
+);
+
+await SecureStore.setItemAsync(
+  'current_user',
+  JSON.stringify(user)
+);
 
       await SecureStore.setItemAsync(
         'token',

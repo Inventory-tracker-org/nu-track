@@ -2,16 +2,28 @@ type LoginResponse = {
   success: boolean;
   data?: {
     token?: string;
+    user?: {
+      id: number;
+      email: string;
+      username: string;
+    };
   };
-  token?: string;
   error?: string;
+};
+
+export type LoggedInUser = {
+  id: number;
+  email: string;
+  username: string;
 };
 
 export async function loginUser(
   email: string,
   password: string
-): Promise<string> {
-
+): Promise<{
+  token: string;
+  user: LoggedInUser;
+}> {
   const response = await fetch(
     'https://dataworks-7b7x.onrender.com/api/login-api.php',
     {
@@ -26,17 +38,33 @@ export async function loginUser(
     }
   );
 
-  const data: LoginResponse = await response.json();
+  const data: LoginResponse =
+    await response.json();
 
-  if (!response.ok || !data.success) {
-    throw new Error(data.error ?? 'Failed to log in.');
+  if (
+    !response.ok ||
+    !data.success
+  ) {
+    throw new Error(
+      data.error ??
+        'Failed to log in.'
+    );
   }
 
-  const token = data.data?.token ?? data.token;
+  const token =
+    data.data?.token;
 
-  if (!token) {
-    throw new Error('The server did not return a token.');
+  const user =
+    data.data?.user;
+
+  if (!token || !user) {
+    throw new Error(
+      'The server did not return valid login information.'
+    );
   }
 
-  return token;
+  return {
+    token,
+    user,
+  };
 }

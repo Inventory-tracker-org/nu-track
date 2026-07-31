@@ -350,22 +350,30 @@ export default function PackageScreen() {
             {packages.map((item, index) => (
   <View
     key={`${item.trackingNumber}-${index}`}
+    style={styles.barcodeBox}
   >
-    <Text>
+    <View style={styles.packageHeader}>
+      <View>
+        <Text style={styles.packageNumber}>
+          Package {index + 1}
+        </Text>
+      </View>
+
+      <TouchableOpacity
+        onPress={() =>
+          removePackage(index)
+        }
+      >
+        <Text style={styles.removeText}>
+          Remove
+        </Text>
+      </TouchableOpacity>
+      
+    </View>
+
+    <Text style={styles.barcode}>
       {item.trackingNumber}
     </Text>
-
-    <Text>
-      Carrier: {item.carrier}
-    </Text>
-
-    <TouchableOpacity
-      onPress={() =>
-        removePackage(index)
-      }
-    >
-      <Text>Remove</Text>
-    </TouchableOpacity>
   </View>
 ))}
           </View>
