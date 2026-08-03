@@ -2,6 +2,8 @@ import {
   useFocusEffect,
 } from '@react-navigation/native';
 
+import { useIsFocused } from '@react-navigation/native';
+
 import {
   setAudioModeAsync,
   useAudioPlayer,
@@ -326,6 +328,8 @@ export default function ScanScreen() {
     permission,
     requestPermission,
   ] = useCameraPermissions();
+
+  const isFocused = useIsFocused();
 
   const {
     delivery,
@@ -742,6 +746,10 @@ export default function ScanScreen() {
       result:
         BarcodeScanningResult
     ): Promise<void> => {
+
+      if (!isFocused) {
+  return;
+}
       if (
         processingScanRef.current
       ) {
@@ -909,29 +917,28 @@ export default function ScanScreen() {
     <View
       style={styles.container}
     >
-      <CameraView
-        style={
-          StyleSheet
-            .absoluteFillObject
-        }
-        facing="back"
-        onBarcodeScanned={
-          handleBarcodeScanned
-        }
-        barcodeScannerSettings={{
-          barcodeTypes: [
-            'code128',
-            'code39',
-            'code93',
-            'ean13',
-            'ean8',
-            'upc_a',
-            'upc_e',
-            'itf14',
-            'codabar',
-          ],
-        }}
-      />
+      {isFocused ? (
+  <CameraView
+    style={StyleSheet.absoluteFillObject}
+    facing="back"
+    onBarcodeScanned={handleBarcodeScanned}
+    barcodeScannerSettings={{
+      barcodeTypes: [
+        'code128',
+        'code39',
+        'code93',
+        'ean13',
+        'ean8',
+        'upc_a',
+        'upc_e',
+        'itf14',
+        'codabar',
+      ],
+    }}
+  />
+) : (
+  <View style={StyleSheet.absoluteFillObject} />
+)}
 
       <View
         style={styles.topBar}
