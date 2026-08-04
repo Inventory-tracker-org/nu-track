@@ -19,7 +19,7 @@ import {
   View,
 } from 'react-native';
 
-import { createPackage } from '../api/packages';
+import { createPackages } from '../api/packages';
 
 import { useDelivery } from '../context/DeliveryContext';
 
@@ -215,21 +215,27 @@ export default function PackageScreen() {
       const { date, time } =
         getDateAndTime();
 
-      for (const item of packages) {
-  await createPackage({
-    barcode: item.trackingNumber,
-    carrier: item.carrier,
+      const result =
+  await createPackages({
+    packages,
+
     date,
     time,
-    comment: notes.trim(),
-    lastName: lastName.trim(),
+
+    comment:
+      notes.trim(),
+
+    lastName:
+      lastName.trim(),
+
     latitude: location.latitude,
     longitude: location.longitude,
+
     photoUri,
     signatureUri,
+
     token,
   });
-}
 
       const uploadedCount =
         packages.length;
@@ -238,11 +244,10 @@ export default function PackageScreen() {
 
       Alert.alert(
         'Delivery Submitted',
-        `${uploadedCount} ${
-          uploadedCount === 1
-            ? 'package was'
-            : 'packages were'
-        } uploaded successfully.`,
+  `${
+    result.package_count ??
+    packages.length
+  } packages were uploaded successfully.`,
         [
           {
             text: 'OK',
