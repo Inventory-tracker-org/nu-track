@@ -1,8 +1,7 @@
 import {
   useFocusEffect,
+  useIsFocused,
 } from '@react-navigation/native';
-
-import { useIsFocused } from '@react-navigation/native';
 
 import {
   setAudioModeAsync,
@@ -31,8 +30,13 @@ import {
   Alert,
   Button,
   FlatList,
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -57,12 +61,8 @@ import {
 } from '../types/delivery';
 
 const MESSAGE_DURATION = 3000;
-const REPEAT_SCAN_DELAY = 1500;
+const REPEAT_SCAN_DELAY = 750;
 
-/*
- * Replace this with the database user ID of the only
- * account allowed to choose a failed-scan sound.
- */
 const SOUND_SETTINGS_USER_ID = 193;
 
 type ScanMode =
@@ -79,257 +79,448 @@ type NormalizedBarcode = {
   carrier: Carrier;
 };
 
+type ScanRegion = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 const getCarrierLabel = (
   carrier: Carrier
 ): string => {
   const labels: Record<Carrier, string> = {
     usps: 'USPS',
-    ups: 'UPS',
     fedex: 'FedEx',
+    ups: 'UPS',
     amazon: 'Amazon',
     gofo: 'GOFO',
     ontrac: 'OnTrac',
     custom: 'Custom',
-    unknown: 'Unknown',
+    gls: 'GLS',
   };
 
   return labels[carrier];
 };
 
-const isValidGenericStandardBarcode = (
+const cleanRawBarcode = (
+  value: string
+): string => {
+  return value
+    .trim()
+    .toUpperCase()
+    .replace(
+      /[\u0000-\u001F\u007F]/g,
+      ''
+    );
+};
+
+const compactBarcode = (
+  value: string
+): string => {
+  return value.replace(
+    /[\s-]+/g,
+    ''
+  );
+};
+
+const isKnownJunkBarcode = (
   value: string
 ): boolean => {
-  if (
-    value.length < 6 ||
-    value.length > 60
-  ) {
-    return false;
-  }
+  const compact =
+    compactBarcode(value);
 
-  if (
+  return (
+    /^SF\d+$/i.test(compact) ||
+    /^D\d+LOCAL$/i.test(compact) ||
+    /^LOCAL/i.test(compact) ||
     /^https?:\/\//i.test(value) ||
     /^www\./i.test(value)
+  );
+};
+
+const normalizeAmazonBarcode = (
+  rawBarcode: string
+): NormalizedBarcode | null => {
+  const compact =
+    compactBarcode(rawBarcode);
+
+  if (
+    !/^TBA\d{9,18}$/.test(
+      compact
+    )
   ) {
-    return false;
+    return null;
   }
 
-  if (!/^[A-Z0-9-]+$/.test(value)) {
-    return false;
+  return {
+    rawBarcode,
+    trackingNumber: compact,
+    carrier: 'amazon',
+  };
+};
+
+const normalizeGlsBarcode = (
+  rawBarcode: string
+): NormalizedBarcode | null => {
+  /*
+   * Preserve the pipe for the C1| format,
+   * but remove whitespace.
+   */
+  const compact =
+    rawBarcode.replace(/\s+/g, '');
+
+  /*
+   * GLS format observed in your workflow:
+   *
+   * C1| followed by digits.
+   *
+   * Example:
+   * C1|12345678
+   */
+  if (/^C1\|\d{1,30}$/.test(compact)) {
+    return {
+      rawBarcode,
+      trackingNumber: compact,
+      carrier: 'gls',
+    };
   }
 
-  const digitCount =
-    value.match(/\d/g)?.length ?? 0;
+  /*
+   * GLS numeric format observed on your label:
+   *
+   * 305022026627915505
+   *
+   * This rule is intentionally narrow:
+   * exactly 18 digits beginning with 305.
+   *
+   * Do not change this to accept every 18-digit
+   * number, because that could reintroduce random
+   * product and routing barcodes.
+   */
+  if (/^305\d{15}$/.test(compact)) {
+    return {
+      rawBarcode,
+      trackingNumber: compact,
+      carrier: 'gls',
+    };
+  }
 
-  return digitCount >= 6;
+  return null;
+};
+
+const normalizeUpsBarcode = (
+  rawBarcode: string
+): NormalizedBarcode | null => {
+  const compact =
+    compactBarcode(rawBarcode);
+
+  if (
+    !/^1Z[A-Z0-9]{16}$/.test(
+      compact
+    )
+  ) {
+    return null;
+  }
+
+  return {
+    rawBarcode,
+    trackingNumber: compact,
+    carrier: 'ups',
+  };
+};
+
+const normalizeGofoBarcode = (
+  rawBarcode: string
+): NormalizedBarcode | null => {
+  const compact =
+    compactBarcode(rawBarcode);
+
+  if (
+    !/^GFUS[A-Z0-9]{8,30}$/.test(
+      compact
+    )
+  ) {
+    return null;
+  }
+
+  return {
+    rawBarcode,
+    trackingNumber: compact,
+    carrier: 'gofo',
+  };
+};
+
+const normalizeOnTracBarcode = (
+  rawBarcode: string
+): NormalizedBarcode | null => {
+  const compact =
+    compactBarcode(rawBarcode);
+
+  /*
+   * This matches C1 followed directly by digits.
+   * It does not match the custom C1|digits format.
+   */
+  if (
+    !/^C1\d{8,24}$/.test(
+      compact
+    )
+  ) {
+    return null;
+  }
+
+  return {
+    rawBarcode,
+    trackingNumber: compact,
+    carrier: 'ontrac',
+  };
+};
+
+const normalizeFedExBarcode = (
+  rawBarcode: string
+): NormalizedBarcode | null => {
+  const digits =
+    rawBarcode.replace(
+      /\D/g,
+      ''
+    );
+
+  /*
+   * Plain printed FedEx tracking number.
+   */
+  if (/^\d{12}$/.test(digits)) {
+    return {
+      rawBarcode,
+      trackingNumber: digits,
+      carrier: 'fedex',
+    };
+  }
+
+  /*
+   * FedEx ASTRA format:
+   * 32 digits, with the 12-digit tracking
+   * number in positions 17 through 28.
+   */
+  if (digits.length === 32) {
+    const trackingNumber =
+      digits.slice(16, 28);
+
+    if (
+      /^\d{12}$/.test(
+        trackingNumber
+      )
+    ) {
+      return {
+        rawBarcode,
+        trackingNumber,
+        carrier: 'fedex',
+      };
+    }
+  }
+
+  /*
+   * FedEx FDX1D format:
+   * Final 14-digit field is commonly
+   * 00 plus the 12-digit tracking number.
+   */
+  if (digits.length === 34) {
+    const trackingField =
+      digits.slice(20, 34);
+
+    if (
+      /^00\d{12}$/.test(
+        trackingField
+      )
+    ) {
+      return {
+        rawBarcode,
+        trackingNumber:
+          trackingField.slice(2),
+        carrier: 'fedex',
+      };
+    }
+  }
+
+  /*
+   * Wrapper patterns observed on your FedEx
+   * package labels.
+   *
+   * Example:
+   * 5091397300875071056348
+   * becomes:
+   * 875071056348
+   */
+  if (
+    digits.length === 22 &&
+    (
+      digits.startsWith('509') ||
+      digits.startsWith('470')
+    )
+  ) {
+    return {
+      rawBarcode,
+      trackingNumber:
+        digits.slice(-12),
+      carrier: 'fedex',
+    };
+  }
+
+  return null;
+};
+
+const normalizeUspsBarcode = (
+  rawBarcode: string
+): NormalizedBarcode | null => {
+  const digits =
+    rawBarcode.replace(
+      /\D/g,
+      ''
+    );
+
+  const compact =
+    compactBarcode(rawBarcode);
+
+  /*
+   * USPS international/S10 format.
+   */
+  if (
+    /^[A-Z]{2}\d{9}US$/.test(
+      compact
+    )
+  ) {
+    return {
+      rawBarcode,
+      trackingNumber: compact,
+      carrier: 'usps',
+    };
+  }
+
+  /*
+   * Plain domestic USPS tracking numbers.
+   *
+   * Do not accept every random 20- or
+   * 22-digit barcode. Require a USPS-style
+   * service prefix.
+   */
+  if (
+    (
+      digits.length === 20 ||
+      digits.length === 22
+    ) &&
+    /^(70|91|92|93|94|95)\d+$/.test(
+      digits
+    )
+  ) {
+    return {
+      rawBarcode,
+      trackingNumber: digits,
+      carrier: 'usps',
+    };
+  }
+
+  /*
+   * USPS scanner output may contain routing,
+   * control, or non-digit information before
+   * the final printed 22-digit number.
+   */
+  if (digits.length > 22) {
+    const candidate =
+      digits.slice(-22);
+
+    if (
+      /^(91|92|93|94|95)\d{20}$/.test(
+        candidate
+      )
+    ) {
+      return {
+        rawBarcode,
+        trackingNumber: candidate,
+        carrier: 'usps',
+      };
+    }
+  }
+
+  return null;
 };
 
 const normalizeStandardBarcode = (
   value: string
 ): NormalizedBarcode | null => {
   const rawBarcode =
-    value.trim().toUpperCase();
-
-  if (!rawBarcode) {
-    return null;
-  }
-
-  /*
-   * Carrier checks use the compact value.
-   * The unmodified scan is preserved in rawBarcode.
-   */
-  const compactBarcode =
-    rawBarcode.replace(
-      /[^A-Z0-9]/g,
-      ''
-    );
-
-  /*
-   * Amazon Logistics:
-   * TBA followed by digits.
-   */
-  if (
-    /^TBA\d+$/.test(
-      compactBarcode
-    )
-  ) {
-    return {
-      rawBarcode,
-      trackingNumber:
-        compactBarcode,
-      carrier: 'amazon',
-    };
-  }
-
-  /*
-   * GOFO:
-   * GFUS followed by letters/numbers.
-   */
-  if (
-    /^GFUS[A-Z0-9]+$/.test(
-      compactBarcode
-    )
-  ) {
-    return {
-      rawBarcode,
-      trackingNumber:
-        compactBarcode,
-      carrier: 'gofo',
-    };
-  }
-
-  /*
-   * OnTrac:
-   * C1 followed directly by digits.
-   *
-   * This does not match C1|digits.
-   */
-  if (
-    /^C1\d+$/.test(
-      compactBarcode
-    )
-  ) {
-    return {
-      rawBarcode,
-      trackingNumber:
-        compactBarcode,
-      carrier: 'ontrac',
-    };
-  }
-
-  /*
-   * UPS:
-   * 1Z followed by 16 alphanumeric characters.
-   */
-  if (
-    /^1Z[A-Z0-9]{16}$/.test(
-      compactBarcode
-    )
-  ) {
-    return {
-      rawBarcode,
-      trackingNumber:
-        compactBarcode,
-      carrier: 'ups',
-    };
-  }
-
-  /*
-   * USPS raw scanner data may include routing,
-   * service information, or non-digit data before
-   * the final printed 22-digit tracking number.
-   */
-  const uspsSuffix =
-    rawBarcode.match(/\d{22}$/);
+    cleanRawBarcode(value);
 
   if (
-    uspsSuffix &&
-    rawBarcode.length > 22
-  ) {
-    const digitsOnly =
-      rawBarcode.replace(
-        /[^0-9]/g,
-        ''
-      );
-
-    if (
-      digitsOnly.length >= 22
-    ) {
-      return {
-        rawBarcode,
-        trackingNumber:
-          digitsOnly.slice(-22),
-        carrier: 'usps',
-      };
-    }
-  }
-
-  /*
-   * Plain USPS tracking numbers.
-   */
-  if (
-    /^\d{20,22}$/.test(
-      compactBarcode
-    )
-  ) {
-    return {
-      rawBarcode,
-      trackingNumber:
-        compactBarcode,
-      carrier: 'usps',
-    };
-  }
-
-  /*
-   * Plain 12-digit values are treated as FedEx.
-   *
-   * Longer FedEx barcode wrappers remain unknown
-   * because you have not found a reliable extraction
-   * rule for all of them.
-   */
-  if (
-    /^\d{12}$/.test(
-      compactBarcode
-    )
-  ) {
-    return {
-      rawBarcode,
-      trackingNumber:
-        compactBarcode,
-      carrier: 'fedex',
-    };
-  }
-
-  if (
-    !isValidGenericStandardBarcode(
-      compactBarcode
+    !rawBarcode ||
+    isKnownJunkBarcode(
+      rawBarcode
     )
   ) {
     return null;
   }
 
-  return {
-    rawBarcode,
-    trackingNumber:
-      compactBarcode,
-    carrier: 'unknown',
-  };
+  /*
+   * Order matters.
+   *
+   * FedEx is checked before USPS so a
+   * numeric FedEx wrapper is not incorrectly
+   * classified as USPS.
+   */
+  return (
+    normalizeAmazonBarcode(
+      rawBarcode
+    ) ??
+    normalizeUpsBarcode(
+      rawBarcode
+    ) ??
+    normalizeGofoBarcode(
+      rawBarcode
+    ) ??
+    normalizeOnTracBarcode(
+      rawBarcode
+    ) ??
+    normalizeGlsBarcode(
+      rawBarcode) 
+      ??
+    normalizeFedExBarcode(
+      rawBarcode
+    ) ??
+    normalizeUspsBarcode(
+      rawBarcode
+    ) ??
+    null
+  );
 };
 
 const normalizeCustomBarcode = (
   value: string
 ): NormalizedBarcode | null => {
   const rawBarcode =
-    value.trim().toUpperCase();
+    cleanRawBarcode(value);
 
-  const compactBarcode =
-    rawBarcode.replace(
-      /\s+/g,
-      ''
-    );
-
-  if (
-    !/^C1\|\d+$/.test(
-      compactBarcode
-    )
-  ) {
+  if (!rawBarcode) {
     return null;
   }
 
+  /*
+   * Custom mode intentionally performs no carrier
+   * format validation. It accepts any nonempty value
+   * returned by the enabled 1D barcode scanners.
+   */
   return {
     rawBarcode,
-    trackingNumber:
-      compactBarcode,
+    trackingNumber: rawBarcode,
     carrier: 'custom',
   };
 };
 
 export default function ScanScreen() {
+  const isFocused =
+    useIsFocused();
+
   const [
     permission,
     requestPermission,
   ] = useCameraPermissions();
-
-  const isFocused = useIsFocused();
 
   const {
     delivery,
@@ -352,20 +543,28 @@ export default function ScanScreen() {
     setMessage,
   ] = useState('');
 
-  /*
-   * Whether the logged-in account is allowed
-   * to use selectable failed-scan sounds.
-   */
+  const [
+    manualVisible,
+    setManualVisible,
+  ] = useState(false);
+
+  const [
+    manualBarcode,
+    setManualBarcode,
+  ] = useState('');
+
+  const [
+    scanRegion,
+    setScanRegion,
+  ] = useState<ScanRegion | null>(
+    null
+  );
+
   const [
     canUseFailedScanSound,
     setCanUseFailedScanSound,
   ] = useState(false);
 
-  /*
-   * The chosen failure feedback setting.
-   *
-   * "default" means vibration only.
-   */
   const [
     selectedFailedSound,
     setSelectedFailedSound,
@@ -373,23 +572,26 @@ export default function ScanScreen() {
     'default'
   );
 
-  /*
-   * Successful scans always play this sound.
-   */
   const successScanPlayer =
     useAudioPlayer(
       SUCCESS_SCAN_SOUND
     );
 
   /*
-   * This player must start with an actual audio file.
-   * It will only be played when selectedFailedSound
-   * is not "default".
+   * This must begin with a real sound.
+   * It is not played when "default"
+   * vibration-only mode is selected.
    */
   const failedScanPlayer =
     useAudioPlayer(
       FAILED_SCAN_SOUND_SOURCES.buzz
     );
+
+  const manualInputRef =
+    useRef<TextInput>(null);
+
+  const scanFrameRef =
+    useRef<View>(null);
 
   const messageTimerRef =
     useRef<ReturnType<
@@ -398,15 +600,11 @@ export default function ScanScreen() {
 
   const lastScanRef =
     useRef<{
-      rawValue: string;
+      value: string;
       mode: ScanMode;
       time: number;
     } | null>(null);
 
-  /*
-   * Prevent multiple camera callbacks from being
-   * handled while feedback is still playing.
-   */
   const processingScanRef =
     useRef(false);
 
@@ -442,10 +640,6 @@ export default function ScanScreen() {
     };
   }, []);
 
-  /*
-   * Reload the failed-scan preference every time
-   * this screen gains focus.
-   */
   useFocusEffect(
     useCallback(() => {
       let active = true;
@@ -480,10 +674,6 @@ export default function ScanScreen() {
               authorized
             );
 
-            /*
-             * Every unauthorized user receives
-             * vibration-only rejection feedback.
-             */
             if (!authorized) {
               setSelectedFailedSound(
                 'default'
@@ -503,10 +693,6 @@ export default function ScanScreen() {
               savedSound
             );
 
-            /*
-             * "default" has no audio file because
-             * it represents vibration only.
-             */
             if (
               savedSound !==
               'default'
@@ -583,6 +769,20 @@ export default function ScanScreen() {
   const playErrorHaptic =
     async (): Promise<void> => {
       try {
+        if (
+          Platform.OS ===
+          'android'
+        ) {
+          await Haptics
+            .performAndroidHapticsAsync(
+              Haptics
+                .AndroidHaptics
+                .Reject
+            );
+
+          return;
+        }
+
         await Haptics
           .notificationAsync(
             Haptics
@@ -617,6 +817,7 @@ export default function ScanScreen() {
 
       if (shouldVibrate) {
         await playErrorHaptic();
+
         return;
       }
 
@@ -631,10 +832,6 @@ export default function ScanScreen() {
           error
         );
 
-        /*
-         * Fall back to vibration if the sound
-         * fails for any reason.
-         */
         await playErrorHaptic();
       }
     };
@@ -649,6 +846,321 @@ export default function ScanScreen() {
     );
   };
 
+  const processBarcodeValue = async (
+    value: string,
+    mode: ScanMode
+  ): Promise<boolean> => {
+    const rawValue =
+      value.trim().toUpperCase();
+
+    if (!rawValue) {
+      await rejectBarcode(
+        'Enter a barcode before adding it.'
+      );
+
+      return false;
+    }
+
+    const normalized =
+      mode === 'standard'
+        ? normalizeStandardBarcode(
+            rawValue
+          )
+        : normalizeCustomBarcode(
+            rawValue
+          );
+
+    if (!normalized) {
+      await rejectBarcode(
+        mode === 'custom'
+          ? 'Enter or scan a barcode.'
+          : 'This is not a recognized package tracking barcode.'
+      );
+
+      return false;
+    }
+
+    const duplicate =
+      packages.some(
+        (
+          item: ScannedPackage
+        ) =>
+          item.trackingNumber ===
+          normalized.trackingNumber
+      );
+
+    if (duplicate) {
+      await rejectBarcode(
+        `Package ${normalized.trackingNumber} was already scanned.`
+      );
+
+      return false;
+    }
+
+    const scannedPackage:
+      ScannedPackage = {
+        ...normalized,
+        scannedAt:
+          new Date()
+            .toISOString(),
+      };
+
+    const wasAdded =
+      addPackage(
+        scannedPackage
+      );
+
+    if (!wasAdded) {
+      await rejectBarcode(
+        `Package ${normalized.trackingNumber} could not be added.`
+      );
+
+      return false;
+    }
+
+    await playSuccessfulScanFeedback();
+
+    return true;
+  };
+
+  const updateScanRegion = () => {
+    requestAnimationFrame(() => {
+      scanFrameRef.current
+        ?.measureInWindow(
+          (
+            x,
+            y,
+            width,
+            height
+          ) => {
+            setScanRegion({
+              x,
+              y,
+              width,
+              height,
+            });
+          }
+        );
+    });
+  };
+
+  const isBarcodeInsideScanRegion = (
+    result: BarcodeScanningResult
+  ): boolean => {
+    if (!scanRegion) {
+      /*
+       * Do not scan before the frame has
+       * been measured.
+       */
+      return false;
+    }
+
+    let centerX:
+      number | null = null;
+
+    let centerY:
+      number | null = null;
+
+    if (
+      Array.isArray(
+        result.cornerPoints
+      ) &&
+      result.cornerPoints.length > 0
+    ) {
+      centerX =
+        result.cornerPoints.reduce(
+          (
+            total,
+            point
+          ) =>
+            total + point.x,
+          0
+        ) /
+        result.cornerPoints.length;
+
+      centerY =
+        result.cornerPoints.reduce(
+          (
+            total,
+            point
+          ) =>
+            total + point.y,
+          0
+        ) /
+        result.cornerPoints.length;
+    } else if (
+      result.bounds &&
+      result.bounds.size.width > 0 &&
+      result.bounds.size.height > 0
+    ) {
+      centerX =
+        result.bounds.origin.x +
+        result.bounds.size.width /
+          2;
+
+      centerY =
+        result.bounds.origin.y +
+        result.bounds.size.height /
+          2;
+    }
+
+    /*
+     * Some devices do not return usable
+     * bounds. Reject those callbacks so the
+     * frame restriction remains meaningful.
+     *
+     * Manual entry remains available as the
+     * fallback.
+     */
+    if (
+      centerX === null ||
+      centerY === null
+    ) {
+      return false;
+    }
+
+    const right =
+      scanRegion.x +
+      scanRegion.width;
+
+    const bottom =
+      scanRegion.y +
+      scanRegion.height;
+
+    return (
+      centerX >= scanRegion.x &&
+      centerX <= right &&
+      centerY >= scanRegion.y &&
+      centerY <= bottom
+    );
+  };
+
+  const handleBarcodeScanned =
+    async (
+      result:
+        BarcodeScanningResult
+    ): Promise<void> => {
+      if (
+        !isFocused ||
+        manualVisible ||
+        processingScanRef.current
+      ) {
+        return;
+      }
+
+      if (
+        !isBarcodeInsideScanRegion(
+          result
+        )
+      ) {
+        return;
+      }
+
+      const rawValue =
+        cleanRawBarcode(
+          result.data
+        );
+
+      if (!rawValue) {
+        return;
+      }
+
+      const now =
+        Date.now();
+
+      const lastScan =
+        lastScanRef.current;
+
+      if (
+        lastScan &&
+        lastScan.value ===
+          rawValue &&
+        lastScan.mode ===
+          scanMode &&
+        now - lastScan.time <
+          REPEAT_SCAN_DELAY
+      ) {
+        return;
+      }
+
+      lastScanRef.current = {
+        value: rawValue,
+        mode: scanMode,
+        time: now,
+      };
+
+      processingScanRef.current =
+        true;
+
+      try {
+        await processBarcodeValue(
+          rawValue,
+          scanMode
+        );
+      } finally {
+        processingScanRef.current =
+          false;
+      }
+    };
+
+  const openManualEntry = () => {
+    /*
+     * Stop the camera from immediately
+     * processing another callback.
+     */
+    processingScanRef.current =
+      false;
+
+    setManualBarcode('');
+    setManualVisible(true);
+  };
+
+  const closeManualEntry = () => {
+    Keyboard.dismiss();
+
+    setManualBarcode('');
+    setManualVisible(false);
+
+    /*
+     * Prevent the barcode behind the modal
+     * from immediately being treated as a
+     * repeat scan when the modal closes.
+     */
+    lastScanRef.current = null;
+  };
+
+  const handleManualAdd =
+    async (): Promise<void> => {
+      if (
+        processingScanRef.current
+      ) {
+        return;
+      }
+
+      processingScanRef.current =
+        true;
+
+      try {
+        const added =
+          await processBarcodeValue(
+            manualBarcode,
+            scanMode
+          );
+
+        if (added) {
+          Keyboard.dismiss();
+
+          setManualBarcode('');
+          setManualVisible(false);
+          lastScanRef.current =
+            null;
+        }
+      } finally {
+        processingScanRef.current =
+          false;
+      }
+    };
+
   const leaveAndDiscard =
     async () => {
       try {
@@ -660,7 +1172,6 @@ export default function ScanScreen() {
       } catch (error) {
         Alert.alert(
           'Unable to Remove Delivery',
-
           error instanceof Error
             ? error.message
             : 'Unable to remove the delivery.'
@@ -694,15 +1205,12 @@ export default function ScanScreen() {
 
     Alert.alert(
       'Remove All Packages',
-
       'Are you sure you want to remove all packages and delivery information?',
-
       [
         {
           text: 'No',
           style: 'cancel',
         },
-
         {
           text: 'Yes',
           style: 'destructive',
@@ -741,138 +1249,17 @@ export default function ScanScreen() {
     setMessage('');
   };
 
-  const handleBarcodeScanned =
-    async (
-      result:
-        BarcodeScanningResult
-    ): Promise<void> => {
-
-      if (!isFocused) {
-  return;
-}
-      if (
-        processingScanRef.current
-      ) {
-        return;
-      }
-
-      const rawValue =
-        result.data
-          .trim()
-          .toUpperCase();
-
-      if (!rawValue) {
-        return;
-      }
-
-      const now =
-        Date.now();
-
-      const lastScan =
-        lastScanRef.current;
-
-      /*
-       * Ignore rapid repeated callbacks while the
-       * same barcode remains in the camera view.
-       */
-      if (
-        lastScan &&
-        lastScan.rawValue ===
-          rawValue &&
-        lastScan.mode ===
-          scanMode &&
-        now - lastScan.time <
-          REPEAT_SCAN_DELAY
-      ) {
-        return;
-      }
-
-      lastScanRef.current = {
-        rawValue,
-        mode: scanMode,
-        time: now,
-      };
-
-      processingScanRef.current =
-        true;
-
-      try {
-        const normalized =
-          scanMode === 'standard'
-            ? normalizeStandardBarcode(
-                rawValue
-              )
-            : normalizeCustomBarcode(
-                rawValue
-              );
-
-        if (!normalized) {
-          await rejectBarcode(
-            scanMode === 'custom'
-              ? 'Custom barcodes must use C1| followed by digits.'
-              : `"${rawValue}" is not a recognized package barcode.`
-          );
-
-          return;
-        }
-
-        const duplicate =
-          packages.some(
-            (item) =>
-              item.trackingNumber ===
-              normalized
-                .trackingNumber
-          );
-
-        if (duplicate) {
-          await rejectBarcode(
-            `Package ${normalized.trackingNumber} was already scanned.`
-          );
-
-          return;
-        }
-
-        const scannedPackage:
-          ScannedPackage = {
-            ...normalized,
-
-            scannedAt:
-              new Date()
-                .toISOString(),
-          };
-
-        const wasAdded =
-          addPackage(
-            scannedPackage
-          );
-
-        if (!wasAdded) {
-          await rejectBarcode(
-            `Package ${normalized.trackingNumber} could not be added.`
-          );
-
-          return;
-        }
-
-        await playSuccessfulScanFeedback();
-      } finally {
-        processingScanRef.current =
-          false;
-      }
-    };
-
   const handleFinish = () => {
-    if (
-      packages.length === 0
-    ) {
+    if (packages.length === 0) {
       Alert.alert(
         'No Packages Scanned',
-
         'Scan at least one package before continuing.'
       );
 
       return;
     }
+
+    Keyboard.dismiss();
 
     router.push('/package');
   };
@@ -883,7 +1270,8 @@ export default function ScanScreen() {
         style={styles.centered}
       >
         <Text>
-          Checking camera permission...
+          Checking camera
+          permission...
         </Text>
       </View>
     );
@@ -917,28 +1305,39 @@ export default function ScanScreen() {
     <View
       style={styles.container}
     >
-      {isFocused ? (
-  <CameraView
-    style={StyleSheet.absoluteFillObject}
-    facing="back"
-    onBarcodeScanned={handleBarcodeScanned}
-    barcodeScannerSettings={{
-      barcodeTypes: [
-        'code128',
-        'code39',
-        'code93',
-        'ean13',
-        'ean8',
-        'upc_a',
-        'upc_e',
-        'itf14',
-        'codabar',
-      ],
-    }}
-  />
-) : (
-  <View style={StyleSheet.absoluteFillObject} />
-)}
+      {isFocused &&
+      !manualVisible ? (
+        <CameraView
+          style={
+            StyleSheet
+              .absoluteFillObject
+          }
+          facing="back"
+          onBarcodeScanned={
+            handleBarcodeScanned
+          }
+          barcodeScannerSettings={{
+            barcodeTypes: [
+              'code128',
+              'code39',
+              'code93',
+              'ean13',
+              'ean8',
+              'upc_a',
+              'upc_e',
+              'itf14',
+              'codabar',
+            ],
+          }}
+        />
+      ) : (
+        <View
+          style={
+            StyleSheet
+              .absoluteFillObject
+          }
+        />
+      )}
 
       <View
         style={styles.topBar}
@@ -963,7 +1362,6 @@ export default function ScanScreen() {
           onPress={handleFinish}
           style={[
             styles.finishButton,
-
             packages.length === 0
               ? styles.disabledButton
               : null,
@@ -991,7 +1389,6 @@ export default function ScanScreen() {
         <TouchableOpacity
           style={[
             styles.tabButton,
-
             scanMode === 'standard'
               ? styles.activeTabButton
               : null,
@@ -1001,11 +1398,11 @@ export default function ScanScreen() {
               'standard'
             )
           }
+          activeOpacity={0.8}
         >
           <Text
             style={[
               styles.tabText,
-
               scanMode === 'standard'
                 ? styles.activeTabText
                 : null,
@@ -1018,7 +1415,6 @@ export default function ScanScreen() {
         <TouchableOpacity
           style={[
             styles.tabButton,
-
             scanMode === 'custom'
               ? styles.activeTabButton
               : null,
@@ -1028,11 +1424,11 @@ export default function ScanScreen() {
               'custom'
             )
           }
+          activeOpacity={0.8}
         >
           <Text
             style={[
               styles.tabText,
-
               scanMode === 'custom'
                 ? styles.activeTabText
                 : null,
@@ -1080,39 +1476,19 @@ export default function ScanScreen() {
           }
         >
           {scanMode === 'standard'
-            ? 'Scan USPS, UPS, Amazon, GOFO, OnTrac, FedEx, or another package barcode.'
-            : 'Scan a barcode using C1| followed by digits.'}
+            ? 'Center a recognized package tracking barcode inside the frame.'
+            : 'Scan any supported 1D barcode. The carrier will be saved as Custom.'}
         </Text>
 
         <View
+          ref={scanFrameRef}
           style={
             styles.scanFrame
           }
+          onLayout={
+            updateScanRegion
+          }
         />
-
-        {scanMode === 'custom' ? (
-          <View
-            style={
-              styles.formatBox
-            }
-          >
-            <Text
-              style={
-                styles.formatLabel
-              }
-            >
-              Required format
-            </Text>
-
-            <Text
-              style={
-                styles.formatExample
-              }
-            >
-              C1|123456789
-            </Text>
-          </View>
-        ) : null}
 
         <View
           style={
@@ -1125,15 +1501,31 @@ export default function ScanScreen() {
             }
           >
             {packages.length}{' '}
-
             {packages.length === 1
               ? 'package'
               : 'packages'}{' '}
-
             scanned
           </Text>
         </View>
       </View>
+
+      <TouchableOpacity
+        style={
+          styles.manualButton
+        }
+        onPress={
+          openManualEntry
+        }
+        activeOpacity={0.8}
+      >
+        <Text
+          style={
+            styles.manualButtonText
+          }
+        >
+          Manual Entry
+        </Text>
+      </TouchableOpacity>
 
       <View
         style={
@@ -1168,6 +1560,7 @@ export default function ScanScreen() {
             showsVerticalScrollIndicator={
               false
             }
+            keyboardShouldPersistTaps="handled"
             renderItem={({
               item,
               index,
@@ -1234,6 +1627,158 @@ export default function ScanScreen() {
           />
         )}
       </View>
+
+      <Modal
+        visible={manualVisible}
+        transparent
+        animationType="fade"
+        statusBarTranslucent
+        onShow={() => {
+          setTimeout(() => {
+            manualInputRef.current
+              ?.focus();
+          }, 250);
+        }}
+        onRequestClose={
+          closeManualEntry
+        }
+      >
+        <KeyboardAvoidingView
+          style={
+            styles.modalKeyboardView
+          }
+          behavior={
+            Platform.OS === 'ios'
+              ? 'padding'
+              : 'height'
+          }
+        >
+          <TouchableOpacity
+            style={
+              styles.modalOverlay
+            }
+            activeOpacity={1}
+            onPress={
+              closeManualEntry
+            }
+          >
+            <TouchableOpacity
+              style={
+                styles.manualModal
+              }
+              activeOpacity={1}
+              onPress={() => {
+                /*
+                 * Prevent taps inside the modal
+                 * from closing it.
+                 */
+              }}
+            >
+              <Text
+                style={
+                  styles.manualModalTitle
+                }
+              >
+                Enter Barcode Manually
+              </Text>
+
+              <Text
+                style={
+                  styles.manualModalDescription
+                }
+              >
+                {scanMode ===
+                'standard'
+                  ? 'Enter the tracking number printed on the package.'
+                  : 'Enter a custom barcode using C1| followed by digits.'}
+              </Text>
+
+              <TextInput
+                ref={
+                  manualInputRef
+                }
+                style={
+                  styles.manualInput
+                }
+                value={
+                  manualBarcode
+                }
+                onChangeText={
+                  setManualBarcode
+                }
+                placeholder={
+                  scanMode ===
+                  'standard'
+                    ? 'Tracking number'
+                    : 'C1|123456789'
+                }
+                placeholderTextColor="#888888"
+                autoFocus
+                autoCapitalize="characters"
+                autoCorrect={false}
+                spellCheck={false}
+                keyboardType="default"
+                returnKeyType="done"
+                blurOnSubmit={false}
+                editable={
+                  !processingScanRef.current
+                }
+                onSubmitEditing={() => {
+                  void handleManualAdd();
+                }}
+              />
+
+              <View
+                style={
+                  styles.modalButtons
+                }
+              >
+                <TouchableOpacity
+                  style={
+                    styles.cancelManualButton
+                  }
+                  onPress={
+                    closeManualEntry
+                  }
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={
+                      styles.cancelManualText
+                    }
+                  >
+                    Cancel
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.addManualButton,
+                    !manualBarcode.trim()
+                      ? styles.disabledButton
+                      : null,
+                  ]}
+                  disabled={
+                    !manualBarcode.trim()
+                  }
+                  onPress={() => {
+                    void handleManualAdd();
+                  }}
+                  activeOpacity={0.8}
+                >
+                  <Text
+                    style={
+                      styles.addManualText
+                    }
+                  >
+                    Add Package
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </TouchableOpacity>
+          </TouchableOpacity>
+        </KeyboardAvoidingView>
+      </Modal>
     </View>
   );
 }
@@ -1291,10 +1836,10 @@ const styles =
     },
 
     finishButton: {
-      backgroundColor: '#ffffff',
       borderRadius: 8,
       paddingHorizontal: 18,
       paddingVertical: 10,
+      backgroundColor: '#ffffff',
     },
 
     finishButtonText: {
@@ -1370,7 +1915,7 @@ const styles =
 
       paddingHorizontal: 24,
       paddingTop: 100,
-      paddingBottom: 190,
+      paddingBottom: 230,
     },
 
     modeTitle: {
@@ -1440,13 +1985,40 @@ const styles =
       fontWeight: '700',
     },
 
+    manualButton: {
+      position: 'absolute',
+      bottom: 230,
+      alignSelf: 'center',
+      zIndex: 25,
+
+      minWidth: 145,
+
+      alignItems: 'center',
+
+      borderWidth: 1,
+      borderColor: '#ffffff',
+      borderRadius: 22,
+
+      paddingHorizontal: 22,
+      paddingVertical: 11,
+
+      backgroundColor:
+        'rgba(0, 0, 0, 0.85)',
+    },
+
+    manualButtonText: {
+      color: '#ffffff',
+      fontSize: 15,
+      fontWeight: '700',
+    },
+
     scannedPanel: {
       position: 'absolute',
       left: 0,
       right: 0,
       bottom: 0,
 
-      maxHeight: 230,
+      height: 210,
 
       paddingTop: 18,
       paddingHorizontal: 20,
@@ -1510,5 +2082,88 @@ const styles =
       color: '#777777',
       fontSize: 11,
       marginTop: 3,
+    },
+
+    modalKeyboardView: {
+      flex: 1,
+    },
+
+    modalOverlay: {
+      flex: 1,
+      justifyContent: 'center',
+
+      paddingHorizontal: 24,
+
+      backgroundColor:
+        'rgba(0, 0, 0, 0.65)',
+    },
+
+    manualModal: {
+      borderRadius: 12,
+      padding: 22,
+      backgroundColor: '#ffffff',
+    },
+
+    manualModalTitle: {
+      color: '#222222',
+      fontSize: 21,
+      fontWeight: '700',
+      marginBottom: 8,
+    },
+
+    manualModalDescription: {
+      color: '#555555',
+      fontSize: 14,
+      lineHeight: 20,
+      marginBottom: 18,
+    },
+
+    manualInput: {
+      borderWidth: 1,
+      borderColor: '#aaaaaa',
+      borderRadius: 8,
+
+      paddingHorizontal: 12,
+      paddingVertical: 13,
+
+      color: '#222222',
+      fontSize: 16,
+
+      marginBottom: 20,
+
+      backgroundColor: '#ffffff',
+    },
+
+    modalButtons: {
+      flexDirection: 'row',
+      justifyContent: 'flex-end',
+      alignItems: 'center',
+      gap: 10,
+    },
+
+    cancelManualButton: {
+      paddingHorizontal: 16,
+      paddingVertical: 12,
+    },
+
+    cancelManualText: {
+      color: '#444444',
+      fontSize: 15,
+      fontWeight: '600',
+    },
+
+    addManualButton: {
+      borderRadius: 8,
+
+      paddingHorizontal: 18,
+      paddingVertical: 12,
+
+      backgroundColor: '#222222',
+    },
+
+    addManualText: {
+      color: '#ffffff',
+      fontSize: 15,
+      fontWeight: '700',
     },
   });

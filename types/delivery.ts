@@ -10,7 +10,7 @@ export type Carrier =
   | 'gofo'
   | 'ontrac'
   | 'custom'
-  | 'unknown';
+  | 'gls';
 
 export type ScannedPackage = {
   rawBarcode: string;
@@ -164,7 +164,7 @@ export const normalizeStoredDelivery =
             rawBarcode: barcode,
             trackingNumber:
               barcode,
-            carrier: 'unknown',
+            carrier: 'custom',
             scannedAt:
               typeof source.createdAt ===
               'string'
