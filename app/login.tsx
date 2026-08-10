@@ -198,7 +198,7 @@ await SecureStore.setItemAsync(
     >
       <View style={styles.form}>
         <Text style={styles.title}>
-          Package Tracker
+          Dataworks Track
         </Text>
 
         <Text style={styles.subtitle}>
