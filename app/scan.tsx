@@ -1690,7 +1690,7 @@ export default function ScanScreen() {
                 {scanMode ===
                 'standard'
                   ? 'Enter the tracking number printed on the package.'
-                  : 'Enter a custom barcode using C1| followed by digits.'}
+                  : 'Enter a custom barcode.'}
               </Text>
 
               <TextInput
@@ -1710,7 +1710,7 @@ export default function ScanScreen() {
                   scanMode ===
                   'standard'
                     ? 'Tracking number'
-                    : 'C1|123456789'
+                    : 'Custom Barcode'
                 }
                 placeholderTextColor="#888888"
                 autoFocus
