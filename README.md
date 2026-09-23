@@ -333,3 +333,6 @@ Angel Estrada
 Computer Science, California State University, Bakersfield
 
 Dataworks Track was developed to support real-world package and asset-management workflows at California State University, Bakersfield.
+
+APP NOT IN USE AS OF NOW, MAYBE FOR FUTURE USE.
+AS A RESULT IMAGE DATABASE IS TEMPORARILY DISABLED
