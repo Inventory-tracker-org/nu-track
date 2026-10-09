@@ -10,7 +10,8 @@ export type Carrier =
   | 'gofo'
   | 'ontrac'
   | 'custom'
-  | 'gls';
+  | 'gls'
+  | 'Distribution';
 
 export type ScannedPackage = {
   rawBarcode: string;
