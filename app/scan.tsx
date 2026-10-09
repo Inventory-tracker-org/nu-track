@@ -98,6 +98,7 @@ const getCarrierLabel = (
     ontrac: 'OnTrac',
     custom: 'Custom',
     gls: 'GLS',
+    Distribution: 'Distribution'
   };
 
   return labels[carrier];
@@ -207,6 +208,23 @@ const normalizeGlsBarcode = (
   }
 
   return null;
+};
+
+const normalizeFullPalette = (
+  rawBarcode: string
+): NormalizedBarcode | null => {
+  const compact =
+    compactBarcode(rawBarcode);
+
+  if (!/^FP\d{10}$/.test(compact)) {
+    return null;
+  }
+
+  return {
+    rawBarcode,
+    trackingNumber: compact,
+    carrier: 'Distribution',
+  };
 };
 
 const normalizeUpsBarcode = (
@@ -485,6 +503,9 @@ const normalizeStandardBarcode = (
       rawBarcode
     ) ??
     normalizeUspsBarcode(
+      rawBarcode
+    ) ??
+    normalizeFullPalette(
       rawBarcode
     ) ??
     null
