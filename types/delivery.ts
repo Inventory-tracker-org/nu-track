@@ -11,7 +11,7 @@ export type Carrier =
   | 'ontrac'
   | 'custom'
   | 'gls'
-  | 'Distribution';
+  | 'distribution';
 
 export type ScannedPackage = {
   rawBarcode: string;

@@ -93,7 +93,7 @@ const getCarrierLabel = (
     ontrac: 'OnTrac',
     custom: 'Custom',
     gls: 'GLS',
-    Distribution: 'Distribution'
+    distribution: 'Distribution'
   };
 
   return labels[carrier];
@@ -218,7 +218,7 @@ const normalizeFullPalette = (
   return {
     rawBarcode,
     trackingNumber: compact,
-    carrier: 'Distribution',
+    carrier: 'distribution',
   };
 };
 
