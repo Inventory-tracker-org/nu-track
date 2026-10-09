@@ -211,7 +211,7 @@ const normalizeFullPalette = (
   const compact =
     compactBarcode(rawBarcode);
 
-  if (!/^FP\d{10}$/.test(compact)) {
+  if (!/^FP\d{5}$/.test(compact)) {
     return null;
   }
 
