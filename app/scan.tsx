@@ -1,9 +1,4 @@
 import {
-  useFocusEffect,
-  useIsFocused,
-} from '@react-navigation/native';
-
-import {
   setAudioModeAsync,
   useAudioPlayer,
 } from 'expo-audio';
@@ -17,7 +12,7 @@ import {
 import * as Haptics from 'expo-haptics';
 import * as SecureStore from 'expo-secure-store';
 
-import { router } from 'expo-router';
+import { router, useFocusEffect, useIsFocused, } from 'expo-router';
 
 import {
   useCallback,
@@ -1331,7 +1326,7 @@ export default function ScanScreen() {
         <CameraView
           style={
             StyleSheet
-              .absoluteFillObject
+              .absoluteFill
           }
           facing="back"
           onBarcodeScanned={
@@ -1355,7 +1350,7 @@ export default function ScanScreen() {
         <View
           style={
             StyleSheet
-              .absoluteFillObject
+              .absoluteFill
           }
         />
       )}
