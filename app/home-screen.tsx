@@ -289,6 +289,18 @@ export default function HomeScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={() => router.push('../receive')}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Receive incoming freight"
+          >
+            <Text style={styles.secondaryButtonText}>
+              Receive Freight
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
             style={
               styles.secondaryButton
             }

@@ -1,25 +1,25 @@
 import {
-    CameraView,
-    useCameraPermissions,
+  CameraView,
+  useCameraPermissions,
 } from 'expo-camera';
 
 import { router } from 'expo-router';
 import { useRef, useState } from 'react';
 
 import {
-    ActivityIndicator,
-    Alert,
-    Button,
-    Image,
-    SafeAreaView,
-    StyleSheet,
-    Text,
-    TouchableOpacity,
-    View,
+  ActivityIndicator,
+  Alert,
+  Button,
+  Image,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 
 import {
-    useDelivery,
+  useDelivery,
 } from '../context/DeliveryContext';
 
 export default function PhotoScreen() {
@@ -199,7 +199,7 @@ export default function PhotoScreen() {
     <View style={styles.cameraContainer}>
       <CameraView
         ref={cameraRef}
-        style={StyleSheet.absoluteFillObject}
+        style={StyleSheet.absoluteFill}
         facing="back"
         mode="picture"
         onCameraReady={() => setCameraReady(true)}

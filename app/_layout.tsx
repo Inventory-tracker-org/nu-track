@@ -39,6 +39,11 @@ export default function RootLayout() {
           />
 
           <Stack.Screen
+            name="receive"
+            options={{ title: 'Receive Freight', gestureEnabled: false }}
+          />
+
+          <Stack.Screen
             name="sync"
           options={{ title: 'Saved Packages' }}
       />
